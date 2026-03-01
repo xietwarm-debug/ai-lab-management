@@ -1,0 +1,287 @@
+@import "./tokens.scss";
+@import "./mixins.scss";
+
+page {
+  background: linear-gradient(180deg, #f9fbff 0%, $bg-page 65%, #eef2f7 100%);
+  color: $gray-900;
+  font-family: $font-sans;
+}
+
+/* Layout */
+.container {
+  padding: $space-4;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+}
+
+.section {
+  @include card-surface;
+  padding: $space-4;
+}
+
+.rowBetween {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Typography */
+.title {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: $gray-900;
+}
+
+.subtitle {
+  margin-top: $space-1;
+  font-size: 13px;
+  line-height: 20px;
+  color: $gray-500;
+}
+
+.cardTitle {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: $gray-900;
+}
+
+.cardDesc {
+  margin-top: $space-1;
+  font-size: 12px;
+  line-height: 18px;
+  color: $gray-500;
+}
+
+.muted {
+  font-size: 12px;
+  color: $gray-500;
+}
+
+.label {
+  font-size: 12px;
+  color: $gray-500;
+  margin: $space-2 0 $space-1;
+}
+
+/* Card */
+.card {
+  @include card-surface;
+  padding: $space-3;
+}
+
+/* Button */
+.btnPrimary,
+.btnSecondary,
+.btnGhost,
+.btnDanger {
+  @include btn-base();
+}
+
+.btnPrimary {
+  @include btn-solid($primary-500, #fff);
+}
+
+.btnSecondary {
+  @include btn-soft($gray-150, $gray-700, $gray-200);
+}
+
+.btnGhost {
+  @include btn-soft(#fff, $gray-700, $gray-200);
+}
+
+.btnDanger {
+  @include btn-soft(#fff1f2, #b91c1c, #fecdd3);
+}
+
+/* Form */
+.inputBase {
+  @include input-base(36px);
+}
+
+.input {
+  @include input-base(36px);
+}
+
+.textareaBase {
+  @include input-base(80px);
+  padding: $space-2 $space-3;
+  line-height: 1.4;
+}
+
+.textarea {
+  @include input-base(80px);
+  padding: $space-2 $space-3;
+  line-height: 1.4;
+}
+
+.fieldError {
+  margin-top: $space-1;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.sectionTitle {
+  font-size: 12px;
+  color: $gray-500;
+  margin: $space-2 0 $space-1;
+}
+
+.calendarBtn {
+  min-height: 36px;
+  box-sizing: border-box;
+  border-radius: $radius-md;
+  border: 1px solid $gray-200;
+  background: $gray-100;
+  color: $gray-700;
+  padding: $space-2 $space-3;
+}
+
+/* Tag / Chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  line-height: 26px;
+  padding: 0 $space-3;
+  border-radius: $radius-pill;
+  background: $gray-150;
+  border: 1px solid $gray-200;
+  color: $gray-700;
+  font-size: 12px;
+}
+
+.statusTag {
+  @include status-tag(#eef2f7, #475569);
+}
+
+.statusTag.success {
+  @include status-tag(#eafaf0, #15803d);
+}
+
+.statusTag.warning {
+  @include status-tag(#fff7e6, #b45309);
+}
+
+.statusTag.danger {
+  @include status-tag(#fff1f2, #b91c1c);
+}
+
+.statusTag.info {
+  @include status-tag(#eaf3ff, #1d4ed8);
+}
+
+/* Modal */
+.modalMask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+}
+
+.modalCard {
+  width: 84%;
+  max-width: 520px;
+  background: #fff;
+  border-radius: $radius-lg;
+  border: 1px solid $gray-200;
+  box-shadow: $shadow-lg;
+  padding: $space-3;
+  box-sizing: border-box;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: $gray-900;
+}
+
+.modalActions {
+  margin-top: $space-3;
+  display: flex;
+  justify-content: flex-end;
+  gap: $space-2;
+}
+
+/* Table */
+.table {
+  border: 1px solid $gray-200;
+  border-radius: $radius-md;
+  overflow: hidden;
+  background: #fff;
+}
+
+.tableRow {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  border-bottom: 1px solid $gray-100;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableHead {
+  background: $gray-50;
+  color: $gray-500;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dataRow {
+  background: #fff;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+@media (hover: hover) {
+  .dataRow:hover {
+    background: #f8fbff;
+    transform: translateX(1px);
+  }
+}
+
+/* Empty state */
+.emptyState {
+  margin-top: $space-6;
+  padding: $space-5 $space-4;
+  text-align: center;
+  border-radius: $radius-xl;
+  border: 1px dashed $gray-300;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.emptyIcon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.emptyTitle {
+  margin-top: $space-2;
+  font-size: 15px;
+  font-weight: 600;
+  color: $gray-700;
+}
+
+.emptySub {
+  margin-top: $space-1;
+  font-size: 12px;
+  color: $gray-500;
+}
+
+.empty {
+  text-align: center;
+  color: $gray-500;
+  margin-top: $space-8;
+  font-size: 12px;
+}

@@ -1,0 +1,72 @@
+@import "./tokens.scss";
+
+@mixin focus-ring($color: $primary-500, $alpha: 0.18) {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(red($color), green($color), blue($color), $alpha);
+}
+
+@mixin card-surface {
+  background: $bg-card;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+}
+
+@mixin btn-base($height: 36px, $font-size: 13px) {
+  height: $height;
+  line-height: $height;
+  border-radius: $radius-md;
+  font-size: $font-size;
+  padding: 0 $space-3;
+  border: 1px solid transparent;
+  transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
+  box-sizing: border-box;
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+@mixin btn-solid($bg, $fg: #fff) {
+  background: $bg;
+  color: $fg;
+
+  &:active {
+    filter: brightness(0.96);
+  }
+}
+
+@mixin btn-soft($bg, $fg, $border-color: transparent) {
+  background: $bg;
+  color: $fg;
+  border-color: $border-color;
+
+  &:active {
+    filter: brightness(0.98);
+  }
+}
+
+@mixin input-base($height: 36px) {
+  min-height: $height;
+  box-sizing: border-box;
+  border: 1px solid $gray-200;
+  border-radius: $radius-md;
+  background: #fff;
+  color: $gray-900;
+  padding: 0 $space-3;
+  font-size: 13px;
+}
+
+@mixin status-tag($bg, $fg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  line-height: 22px;
+  padding: 0 $space-2;
+  border-radius: $radius-pill;
+  background: $bg;
+  color: $fg;
+  font-size: 11px;
+  font-weight: 600;
+}
