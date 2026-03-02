@@ -1,18 +1,18 @@
 @import "./tokens.scss";
 
-@mixin focus-ring($color: $primary-500, $alpha: 0.18) {
+@mixin focus-ring($ring-color: var(--color-border-focus)) {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(red($color), green($color), blue($color), $alpha);
+  box-shadow: 0 0 0 3px $ring-color;
 }
 
 @mixin card-surface {
-  background: $bg-card;
-  border: 1px solid $gray-200;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
   border-radius: $radius-lg;
   box-shadow: $shadow-md;
 }
 
-@mixin btn-base($height: 36px, $font-size: 13px) {
+@mixin btn-base($height: 36px, $font-size: $font-size-sm) {
   height: $height;
   line-height: $height;
   border-radius: $radius-md;
@@ -49,12 +49,12 @@
 @mixin input-base($height: 36px) {
   min-height: $height;
   box-sizing: border-box;
-  border: 1px solid $gray-200;
+  border: 1px solid var(--color-border-primary);
   border-radius: $radius-md;
-  background: #fff;
-  color: $gray-900;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
   padding: 0 $space-3;
-  font-size: 13px;
+  font-size: $font-size-sm;
 }
 
 @mixin status-tag($bg, $fg) {
@@ -67,6 +67,6 @@
   border-radius: $radius-pill;
   background: $bg;
   color: $fg;
-  font-size: 11px;
+  font-size: $font-size-xs;
   font-weight: 600;
 }

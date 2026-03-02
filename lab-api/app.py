@@ -11,9 +11,12 @@ import time
 import hmac
 import base64
 import hashlib
+import re
 from collections import deque
 from threading import Lock
 from functools import wraps
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
 from flask import g
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -81,11 +84,42 @@ RATE_LIMIT_RULES = {
     "refresh": {"window": 60, "max": 20},
     "change_password": {"window": 300, "max": 10},
 }
+DEFAULT_RESERVATION_SLOTS = [
+    "08:00-08:40",
+    "08:45-09:35",
+    "10:25-11:05",
+    "11:10-11:50",
+    "14:30-15:10",
+    "15:15-15:55",
+    "16:05-16:45",
+    "16:50-17:30",
+    "19:00-19:40",
+    "19:45-20:25",
+]
+PERIOD_SLOT_ITEMS = [
+    {"index": 1, "label": "第一节", "time": "08:00-08:40"},
+    {"index": 2, "label": "第二节", "time": "08:45-09:35"},
+    {"index": 3, "label": "第三节", "time": "10:25-11:05"},
+    {"index": 4, "label": "第四节", "time": "11:10-11:50"},
+    {"index": 5, "label": "第五节", "time": "14:30-15:10"},
+    {"index": 6, "label": "第六节", "time": "15:15-15:55"},
+    {"index": 7, "label": "第七节", "time": "16:05-16:45"},
+    {"index": 8, "label": "第八节", "time": "16:50-17:30"},
+    {"index": 9, "label": "第九节", "time": "19:00-19:40"},
+    {"index": 10, "label": "第十节", "time": "19:45-20:25"},
+]
+PERIOD_INDEX_TO_SLOT = {int(x["index"]): str(x["time"]) for x in PERIOD_SLOT_ITEMS}
+_CN_DIGIT_MAP = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+PERIOD_MAPPING_TEXT = "；".join([f"{x['label']}({x['index']})={x['time']}" for x in PERIOD_SLOT_ITEMS])
 RESERVATION_MIN_DAYS_AHEAD = env_int("RESERVATION_MIN_DAYS_AHEAD", 0)
 RESERVATION_MAX_DAYS_AHEAD = env_int("RESERVATION_MAX_DAYS_AHEAD", 30)
 RESERVATION_MIN_TIME = os.getenv("RESERVATION_MIN_TIME", "08:00")
 RESERVATION_MAX_TIME = os.getenv("RESERVATION_MAX_TIME", "22:00")
 RESERVATION_LOCK_TIMEOUT_SECONDS = env_int("RESERVATION_LOCK_TIMEOUT_SECONDS", 5)
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "").strip()
+SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn").strip().rstrip("/")
+SILICONFLOW_MODEL = os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct").strip()
+SILICONFLOW_TIMEOUT_SECONDS = env_int("SILICONFLOW_TIMEOUT_SECONDS", 20)
 _RATE_LIMIT_BUCKETS = {}
 _RATE_LIMIT_LOCK = Lock()
 
@@ -228,6 +262,28 @@ def ensure_audit_log_table():
                     created_at DATETIME NOT NULL,
                     INDEX idx_operator_id (operator_id),
                     INDEX idx_action (action),
+                    INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_announcement_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS announcement (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    title VARCHAR(120) NOT NULL DEFAULT '',
+                    content TEXT NOT NULL,
+                    publisher_id INT NULL,
+                    publisher_name VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL,
                     INDEX idx_created_at (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
@@ -481,8 +537,31 @@ def auth_required(roles=None):
     return decorator
 
 
+def _minutes_to_hhmm(minutes):
+    if minutes is None or minutes < 0:
+        return ""
+    hh = int(minutes // 60)
+    mm = int(minutes % 60)
+    return f"{hh:02d}:{mm:02d}"
+
+
+def _canonicalize_slot_text(slot_text):
+    start, end = _slot_to_minutes(slot_text)
+    if start is None or end is None:
+        return str(slot_text or "").strip()
+    return f"{_minutes_to_hhmm(start)}-{_minutes_to_hhmm(end)}"
+
+
 def parse_slots(time_range):
-    return {t.strip() for t in (time_range or "").split(",") if t.strip()}
+    slots = set()
+    for t in (time_range or "").split(","):
+        raw = t.strip()
+        if not raw:
+            continue
+        canonical = _canonicalize_slot_text(raw)
+        if canonical:
+            slots.add(canonical)
+    return slots
 
 
 def _clock_to_minutes(text):
@@ -512,13 +591,85 @@ def _slot_to_minutes(slot_text):
     return start, end
 
 
+def _resolve_rule_slots(payload):
+    payload = payload or {}
+    rule_slots = payload.get("slots")
+    if not isinstance(rule_slots, list):
+        rule_slots = list(DEFAULT_RESERVATION_SLOTS)
+
+    allowed_start = _clock_to_minutes(payload.get("minTime", RESERVATION_MIN_TIME))
+    allowed_end = _clock_to_minutes(payload.get("maxTime", RESERVATION_MAX_TIME))
+
+    resolved = []
+    seen = set()
+    for raw in rule_slots:
+        canonical = _canonicalize_slot_text(raw)
+        if not canonical or canonical in seen:
+            continue
+        start, end = _slot_to_minutes(canonical)
+        if start is None or end is None:
+            continue
+        if allowed_start is not None and start < allowed_start:
+            continue
+        if allowed_end is not None and end > allowed_end:
+            continue
+        seen.add(canonical)
+        resolved.append(canonical)
+    return resolved
+
+
+def _count_slot_frequency(rows):
+    freq = {}
+    for row in rows or []:
+        for slot in parse_slots(row.get("time")):
+            freq[slot] = int(freq.get(slot) or 0) + 1
+    max_count = max(freq.values()) if freq else 0
+    return freq, max_count
+
+
+def _build_recommend_time_windows(rule_slots):
+    normalized = []
+    for slot in rule_slots or []:
+        canonical = _canonicalize_slot_text(slot)
+        start, end = _slot_to_minutes(canonical)
+        if start is None or end is None:
+            continue
+        normalized.append({"slot": canonical, "start": start, "end": end})
+
+    normalized.sort(key=lambda x: (x["start"], x["end"]))
+    windows = []
+
+    # Prefer teacher-friendly double-period windows: 1-2, 3-4, 5-6, 7-8 ...
+    idx = 0
+    while idx + 1 < len(normalized):
+        cur = normalized[idx]
+        nxt = normalized[idx + 1]
+        if cur["end"] == nxt["start"]:
+            windows.append(
+                {
+                    "time": f"{cur['slot']},{nxt['slot']}",
+                    "firstStart": cur["start"],
+                    "slots": [cur["slot"], nxt["slot"]],
+                }
+            )
+        idx += 2
+
+    if windows:
+        return windows
+
+    # Fallback to single slot windows if no valid consecutive pairs exist.
+    for row in normalized:
+        windows.append({"time": row["slot"], "firstStart": row["start"], "slots": [row["slot"]]})
+    return windows
+
+
 def get_reservation_rules_payload():
     today = datetime.now().date()
     min_days = max(0, RESERVATION_MIN_DAYS_AHEAD)
     max_days = max(min_days, RESERVATION_MAX_DAYS_AHEAD)
     min_date = (today + timedelta(days=min_days)).strftime("%Y-%m-%d")
     max_date = (today + timedelta(days=max_days)).strftime("%Y-%m-%d")
-    return {
+    payload = {
         "minDaysAhead": min_days,
         "maxDaysAhead": max_days,
         "minTime": RESERVATION_MIN_TIME,
@@ -526,6 +677,9 @@ def get_reservation_rules_payload():
         "minDate": min_date,
         "maxDate": max_date,
     }
+    payload["slots"] = _resolve_rule_slots(payload)
+    payload["periodSlots"] = PERIOD_SLOT_ITEMS
+    return payload
 
 
 def validate_reservation_schedule(date_text, time_range):
@@ -761,6 +915,313 @@ def fetch_audit_logs(action="", operator="", target_type="", start_date="", end_
     return rows, total, ""
 
 
+def _extract_json_object(raw_text):
+    text = str(raw_text or "")
+    if not text:
+        return ""
+
+    start = text.find("{")
+    if start < 0:
+        return ""
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return ""
+
+
+def _normalize_agent_time(raw_time):
+    if isinstance(raw_time, list):
+        parts = [str(x or "").strip() for x in raw_time]
+    else:
+        normalized = str(raw_time or "").replace("，", ",").replace("；", ",").replace("、", ",")
+        parts = [x.strip() for x in normalized.split(",")]
+    clean = []
+    for part in parts:
+        if not part:
+            continue
+        canonical = _canonicalize_slot_text(part)
+        if canonical:
+            clean.append(canonical)
+    return ",".join(clean)
+
+
+def _cn_to_int(token):
+    raw = str(token or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        try:
+            return int(raw)
+        except Exception:
+            return None
+    if raw == "十":
+        return 10
+    if raw in _CN_DIGIT_MAP:
+        return int(_CN_DIGIT_MAP[raw])
+    if raw.startswith("十"):
+        tail = raw[1:]
+        if tail in _CN_DIGIT_MAP:
+            return 10 + int(_CN_DIGIT_MAP[tail])
+    if raw.endswith("十"):
+        head = raw[:-1]
+        if head in _CN_DIGIT_MAP:
+            return int(_CN_DIGIT_MAP[head]) * 10
+    if "十" in raw:
+        parts = raw.split("十", 1)
+        left = parts[0].strip()
+        right = parts[1].strip()
+        left_num = _CN_DIGIT_MAP.get(left) if left else 1
+        right_num = _CN_DIGIT_MAP.get(right) if right else 0
+        if left_num is not None and right_num is not None:
+            return int(left_num) * 10 + int(right_num)
+    return None
+
+
+def _parse_period_token(token):
+    val = _cn_to_int(token)
+    if val is None:
+        return None
+    return int(val) if int(val) in PERIOD_INDEX_TO_SLOT else None
+
+
+def _extract_time_from_period_expression(text):
+    raw = str(text or "")
+    if not raw:
+        return ""
+
+    s = (
+        raw.replace("－", "-")
+        .replace("—", "-")
+        .replace("～", "-")
+        .replace("~", "-")
+        .replace("到", "-")
+        .replace("至", "-")
+        .replace("。", ".")
+        .replace("．", ".")
+    )
+
+    seq = []
+
+    def add_period(n):
+        if n is None:
+            return
+        if n not in PERIOD_INDEX_TO_SLOT:
+            return
+        if n not in seq:
+            seq.append(n)
+
+    # 1-2节 / 第一-第二节 / 第1节-第2节
+    for m in re.finditer(r"第?\s*([0-9一二三四五六七八九十两]+)\s*-\s*第?\s*([0-9一二三四五六七八九十两]+)\s*节", s):
+        a = _parse_period_token(m.group(1))
+        b = _parse_period_token(m.group(2))
+        if a is None or b is None:
+            continue
+        if a <= b:
+            for n in range(a, b + 1):
+                add_period(n)
+        else:
+            for n in range(a, b - 1, -1):
+                add_period(n)
+
+    # 12节 / 34节 / 56节 / 78节 (紧凑说法)
+    for m in re.finditer(r"(?<!\d)([1-9]{2})\s*节", s):
+        pair = m.group(1)
+        for ch in pair:
+            add_period(_parse_period_token(ch))
+
+    # 12两节 / 34两节
+    for m in re.finditer(r"(?<!\d)([1-9]{2})\s*两节", s):
+        pair = m.group(1)
+        for ch in pair:
+            add_period(_parse_period_token(ch))
+
+    # 9.10两节 / 1,2节 / 第3、4节
+    for m in re.finditer(
+        r"第?\s*([0-9一二三四五六七八九十两]+)\s*[、,，.]\s*第?\s*([0-9一二三四五六七八九十两]+?)\s*两?节",
+        s,
+    ):
+        add_period(_parse_period_token(m.group(1)))
+        add_period(_parse_period_token(m.group(2)))
+
+    # 第一节 第二节 / 第9节
+    for m in re.finditer(r"第?\s*([0-9一二三四五六七八九十两]+)\s*节", s):
+        add_period(_parse_period_token(m.group(1)))
+
+    if not seq:
+        return ""
+
+    ordered = sorted(seq)
+    slots = [PERIOD_INDEX_TO_SLOT[n] for n in ordered if n in PERIOD_INDEX_TO_SLOT]
+    return ",".join(slots)
+
+
+def _validate_time_with_rule_slots(time_range, rule_payload):
+    slots = parse_slots(time_range)
+    if not slots:
+        return "time required"
+    allowed_slots = set(_resolve_rule_slots(rule_payload))
+    invalid = sorted([s for s in slots if s not in allowed_slots])
+    if invalid:
+        return f"time slots not allowed: {','.join(invalid)}"
+    return ""
+
+
+def _resolve_lab_from_agent(lab_id=None, lab_name=""):
+    lab_id = _to_int_or_none(lab_id)
+    name = str(lab_name or "").strip()
+
+    if lab_id:
+        rows = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lab_id,))
+        if not rows:
+            raise BizError("lab not found", 404)
+        return rows[0]
+
+    if not name:
+        raise BizError("missing lab info", 400)
+
+    exact = query("SELECT id, name FROM lab WHERE name=%s LIMIT 1", (name,))
+    if exact:
+        return exact[0]
+
+    fuzzy = query(
+        """
+        SELECT id, name
+        FROM lab
+        WHERE name LIKE %s
+        ORDER BY id ASC
+        LIMIT 5
+        """,
+        (f"%{name}%",),
+    )
+    if not fuzzy:
+        raise BizError("lab not found", 404)
+    if len(fuzzy) > 1:
+        options = "、".join([str(x.get("name") or "") for x in fuzzy if x.get("name")])
+        raise BizError(f"lab ambiguous, candidates: {options}", 400)
+    return fuzzy[0]
+
+
+def _call_siliconflow_to_parse(text, rule_payload):
+    if not SILICONFLOW_API_KEY:
+        raise BizError("SILICONFLOW_API_KEY not configured", 500)
+
+    rule_slots = _resolve_rule_slots(rule_payload)
+    slot_text = ", ".join(rule_slots)
+    system_prompt = (
+        "你是实验室预约参数解析器。"
+        "请把用户输入解析为严格JSON，不要输出JSON以外任何字符。"
+        "JSON字段固定为: intent, lab_id, lab_name, date, time, reason, missing。"
+        "intent只允许 reserve 或 ask。"
+        "date格式必须是YYYY-MM-DD。"
+        "time格式必须是一个或多个时段，用英文逗号分隔，每个时段是HH:MM-HH:MM。"
+        f"节次映射如下: {PERIOD_MAPPING_TEXT}。"
+        "若用户说第X节、X-Y节、12两节、9.10两节，请按映射转换成time字段。"
+        f"可用时段仅限: {slot_text}。"
+        "若信息不足，intent输出ask，并在missing中给出缺失字段数组。"
+    )
+
+    payload = {
+        "model": SILICONFLOW_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": str(text or "")},
+        ],
+        "temperature": 0.1,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urlrequest.Request(
+        f"{SILICONFLOW_BASE_URL}/v1/chat/completions",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlrequest.urlopen(req, timeout=max(3, int(SILICONFLOW_TIMEOUT_SECONDS))) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+    except HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            detail = ""
+        raise BizError(f"llm http error: {e.code} {detail[:200]}", 502)
+    except URLError as e:
+        raise BizError(f"llm connect error: {e}", 502)
+    except Exception as e:
+        raise BizError(f"llm request failed: {e}", 502)
+
+    try:
+        api_result = json.loads(raw)
+    except Exception:
+        raise BizError("llm response is not json", 502)
+
+    content = ""
+    try:
+        choices = api_result.get("choices") or []
+        content = str((((choices[0] or {}).get("message") or {}).get("content")) or "")
+    except Exception:
+        content = ""
+    if not content:
+        raise BizError("llm empty response", 502)
+
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        extracted = _extract_json_object(content)
+        if not extracted:
+            raise BizError("llm output parse failed", 502)
+        try:
+            parsed = json.loads(extracted)
+        except Exception:
+            raise BizError("llm output parse failed", 502)
+
+    if not isinstance(parsed, dict):
+        raise BizError("llm output not object", 502)
+
+    return {
+        "intent": str(parsed.get("intent") or "").strip().lower() or "ask",
+        "labId": _to_int_or_none(parsed.get("lab_id")),
+        "labName": str(parsed.get("lab_name") or parsed.get("lab") or "").strip(),
+        "date": str(parsed.get("date") or "").strip(),
+        "time": _normalize_agent_time(parsed.get("time")),
+        "reason": str(parsed.get("reason") or "").strip(),
+        "missing": parsed.get("missing") if isinstance(parsed.get("missing"), list) else [],
+        "raw": parsed,
+    }
+
+
+def _agent_response(code=0, msg="ok", reply="", action="reply", reservation=None, http_status=200):
+    data = {"reply": str(reply or ""), "action": str(action or "reply")}
+    if reservation is not None:
+        data["reservation"] = reservation
+    return jsonify({"code": int(code), "msg": str(msg or ""), "data": data}), int(http_status)
+
+
 try:
     ensure_user_password_column()
 except Exception as e:
@@ -777,6 +1238,11 @@ except Exception as e:
     print(f"[warn] ensure_audit_log_table failed: {e}")
 
 try:
+    ensure_announcement_table()
+except Exception as e:
+    print(f"[warn] ensure_announcement_table failed: {e}")
+
+try:
     ensure_lost_found_claim_columns()
 except Exception as e:
     print(f"[warn] ensure_lost_found_claim_columns failed: {e}")
@@ -791,6 +1257,232 @@ def health():
 @auth_required()
 def reservation_rules():
     return jsonify({"ok": True, "data": get_reservation_rules_payload()})
+
+
+@app.get("/ai/recommend-slots")
+@auth_required()
+def ai_recommend_slots():
+    try:
+        lab_id = _to_int_or_none(request.args.get("lab_id"))
+        days = _to_int_or_none(request.args.get("days"))
+        k = _to_int_or_none(request.args.get("k"))
+
+        if not lab_id or lab_id <= 0:
+            raise BizError("lab_id required", 400)
+
+        days = int(days or 14)
+        k = int(k or 3)
+        days = max(1, min(days, 60))
+        k = max(1, min(k, 20))
+
+        user_name = (g.current_user.get("username") or "").strip()
+        if not user_name:
+            raise BizError("unauthorized", 401)
+
+        lab_rows = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lab_id,))
+        if not lab_rows:
+            raise BizError("lab not found", 404)
+        lab_name = (lab_rows[0].get("name") or "").strip()
+        if not lab_name:
+            raise BizError("lab not found", 404)
+
+        rule_payload = get_reservation_rules_payload()
+        candidate_slots = _resolve_rule_slots(rule_payload)
+        if not candidate_slots:
+            raise BizError("no available rule slots", 409)
+        candidate_windows = _build_recommend_time_windows(candidate_slots)
+        if not candidate_windows:
+            raise BizError("no candidate windows", 409)
+
+        user_rows = query(
+            """
+            SELECT time
+            FROM reservation
+            WHERE user_name=%s AND status<>'cancelled'
+            """,
+            (user_name,),
+        )
+        global_rows = query(
+            """
+            SELECT time
+            FROM reservation
+            WHERE lab_id=%s AND status<>'cancelled'
+            """,
+            (lab_id,),
+        )
+
+        user_freq, user_max = _count_slot_frequency(user_rows)
+        global_freq, global_max = _count_slot_frequency(global_rows)
+
+        base_date = datetime.now().date()
+        picked = []
+
+        for offset in range(days):
+            date_text = (base_date + timedelta(days=offset)).strftime("%Y-%m-%d")
+            for window in candidate_windows:
+                time_range = window["time"]
+                schedule_error = validate_reservation_schedule(date_text, time_range)
+                if schedule_error:
+                    continue
+                if has_approved_conflict(lab_name, date_text, time_range):
+                    continue
+
+                slot_items = window.get("slots") or []
+                if not slot_items:
+                    continue
+                user_score = sum((float(user_freq.get(s) or 0) / float(user_max)) if user_max > 0 else 0.0 for s in slot_items) / len(slot_items)
+                global_score = sum((float(global_freq.get(s) or 0) / float(global_max)) if global_max > 0 else 0.0 for s in slot_items) / len(slot_items)
+                score = 0.7 * user_score + 0.3 * global_score
+
+                picked.append(
+                    {
+                        "date": date_text,
+                        "time": time_range,
+                        "scoreRaw": score,
+                        "sortStart": int(window.get("firstStart") or 0),
+                        "reason": "双节连排推荐（基于历史预约偏好与实验室热度）",
+                    }
+                )
+
+        picked.sort(key=lambda x: (-x["scoreRaw"], x["date"], x["sortStart"], x["time"]))
+
+        recommendations = []
+        for row in picked[:k]:
+            recommendations.append(
+                {
+                    "date": row["date"],
+                    "time": row["time"],
+                    "score": round(float(row["scoreRaw"]), 4),
+                    "reason": row["reason"],
+                }
+            )
+
+        return jsonify({"code": 0, "data": {"recommendations": recommendations}, "msg": "ok"})
+    except BizError as e:
+        return jsonify({"code": int(e.status or 1), "data": {"recommendations": []}, "msg": e.msg}), e.status
+    except Exception:
+        return jsonify({"code": 500, "data": {"recommendations": []}, "msg": "internal error"}), 500
+
+
+@app.post("/agent/chat")
+@auth_required()
+def agent_chat():
+    data = request.get_json(force=True) or {}
+    text = str(data.get("text") or "").strip()
+    if not text:
+        return _agent_response(code=400, msg="text required", reply="请先输入你要预约的内容。", action="ask_info", http_status=400)
+
+    user_name = (g.current_user.get("username") or "").strip()
+    if not user_name:
+        return _agent_response(code=401, msg="unauthorized", reply="登录状态失效，请重新登录。", action="error", http_status=401)
+
+    rule_payload = get_reservation_rules_payload()
+    try:
+        parsed = _call_siliconflow_to_parse(text, rule_payload)
+    except BizError as e:
+        return _agent_response(
+            code=e.status,
+            msg=e.msg,
+            reply="智能助手暂时不可用，请稍后重试。",
+            action="error",
+            http_status=e.status,
+        )
+
+    intent = parsed.get("intent") or "ask"
+    date_text = str(parsed.get("date") or "").strip()
+    time_text = str(parsed.get("time") or "").strip()
+    reason = str(parsed.get("reason") or "").strip()
+    lab_id = parsed.get("labId")
+    lab_name = parsed.get("labName") or ""
+    missing = list(parsed.get("missing") or [])
+    period_time_text = _extract_time_from_period_expression(text)
+
+    if period_time_text:
+        if not time_text:
+            time_text = period_time_text
+        else:
+            parsed_slot_error = _validate_time_with_rule_slots(time_text, rule_payload)
+            if parsed_slot_error:
+                fallback_slot_error = _validate_time_with_rule_slots(period_time_text, rule_payload)
+                if not fallback_slot_error:
+                    time_text = period_time_text
+
+    if intent != "reserve":
+        reply = "我可以帮你自动预约，请告诉我实验室、日期和时段。例如：明天在软件实验室上 1-2 节。"
+        return _agent_response(code=0, msg="ok", reply=reply, action="ask_info", http_status=200)
+
+    if not date_text:
+        missing.append("date")
+    if not time_text:
+        missing.append("time")
+    if not lab_id and not str(lab_name).strip():
+        missing.append("lab")
+    if time_text:
+        missing = [x for x in missing if str(x).strip().lower() != "time"]
+
+    if missing:
+        missing_fields = sorted({str(x) for x in missing if str(x)})
+        reply = f"还缺少预约信息：{', '.join(missing_fields)}。请补充后我再为你提交预约。"
+        return _agent_response(code=0, msg="ok", reply=reply, action="ask_info", http_status=200)
+
+    slot_error = _validate_time_with_rule_slots(time_text, rule_payload)
+    if slot_error:
+        reply = f"时段格式不符合预约规则：{slot_error}。请使用标准时段，或直接说第1节/1-2节/9.10两节后重试。"
+        return _agent_response(code=0, msg="ok", reply=reply, action="ask_info", http_status=200)
+
+    schedule_error = validate_reservation_schedule(date_text, time_text)
+    if schedule_error:
+        reply = f"预约时间不合法：{schedule_error}。请调整日期或时段。"
+        return _agent_response(code=0, msg="ok", reply=reply, action="ask_info", http_status=200)
+
+    try:
+        lab = _resolve_lab_from_agent(lab_id=lab_id, lab_name=lab_name)
+    except BizError as e:
+        return _agent_response(code=e.status, msg=e.msg, reply=f"实验室信息有问题：{e.msg}", action="ask_info", http_status=e.status)
+
+    try:
+        created = create_reservation_internal(
+            user_name=user_name,
+            lab_id=lab.get("id"),
+            lab_name=lab.get("name"),
+            date=date_text,
+            time_range=time_text,
+            reason=reason or "智能助手自动预约",
+        )
+    except BizError as e:
+        if int(e.status) == 409:
+            reply = "该时段已冲突或被占用，请换一个时段，我可以继续帮你提交。"
+            return _agent_response(code=0, msg="ok", reply=reply, action="conflict", http_status=200)
+        return _agent_response(code=e.status, msg=e.msg, reply=f"预约失败：{e.msg}", action="error", http_status=e.status)
+
+    reply = f"已为你提交预约：{created['labName']}，{created['date']} {created['time']}，当前状态为待审批。"
+    audit_log(
+        "agent.chat.reserve.success",
+        target_type="reservation",
+        target_id=created["id"],
+        detail={
+            "source": "agent",
+            "labId": created["labId"],
+            "labName": created["labName"],
+            "date": created["date"],
+            "time": created["time"],
+        },
+    )
+    return _agent_response(
+        code=0,
+        msg="ok",
+        reply=reply,
+        action="reserve_created",
+        reservation={
+            "id": created["id"],
+            "labId": created["labId"],
+            "labName": created["labName"],
+            "date": created["date"],
+            "time": created["time"],
+            "status": created["status"],
+        },
+        http_status=200,
+    )
 
 
 @app.post("/login")
@@ -1724,6 +2416,70 @@ def delete_lab(lid):
     return jsonify({"ok": True})
 
 
+def create_reservation_internal(user_name, date, time_range, reason="", lab_id=None, lab_name=""):
+    user = str(user_name or "").strip()
+    date_text = str(date or "").strip()
+    time_text = str(time_range or "").strip()
+    reason_text = str(reason or "").strip()
+    lab_id_val = _to_int_or_none(lab_id)
+    lab_name_val = str(lab_name or "").strip()
+
+    if not user:
+        raise BizError("user required", 400)
+    if not date_text or not time_text:
+        raise BizError("params error", 400)
+
+    schedule_error = validate_reservation_schedule(date_text, time_text)
+    if schedule_error:
+        raise BizError(schedule_error, 400)
+
+    if lab_id_val:
+        lab_rows = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lab_id_val,))
+    elif lab_name_val:
+        lab_rows = query("SELECT id, name FROM lab WHERE name=%s LIMIT 1", (lab_name_val,))
+    else:
+        raise BizError("lab required", 400)
+
+    if not lab_rows:
+        raise BizError("lab not found", 404)
+
+    resolved_lab_id = int(lab_rows[0]["id"])
+    resolved_lab_name = str(lab_rows[0]["name"] or "").strip()
+    if not resolved_lab_name:
+        raise BizError("lab not found", 404)
+
+    created_at = datetime.now().isoformat(timespec="seconds")
+
+    def _tx(cur):
+        lock_key = _reservation_lock_key(resolved_lab_name, date_text)
+        if not _acquire_named_lock(cur, lock_key):
+            raise BizError("reservation busy, try again", 409)
+        try:
+            if has_approved_conflict_with_cur(cur, resolved_lab_name, date_text, time_text):
+                raise BizError("reservation conflict with approved", 409)
+            cur.execute(
+                """
+                INSERT INTO reservation (lab_id, lab_name, user_name, date, time, reason, status, reject_reason, created_at)
+                VALUES (%s,%s,%s,%s,%s,%s,'pending','',%s)
+                """,
+                (resolved_lab_id, resolved_lab_name, user, date_text, time_text, reason_text, created_at),
+            )
+            return cur.lastrowid
+        finally:
+            _release_named_lock(cur, lock_key)
+
+    new_id = run_in_transaction(_tx)
+    return {
+        "id": int(new_id),
+        "labId": resolved_lab_id,
+        "labName": resolved_lab_name,
+        "date": date_text,
+        "time": time_text,
+        "reason": reason_text,
+        "status": "pending",
+    }
+
+
 @app.post("/reservations")
 @auth_required()
 def create_reservation():
@@ -1739,41 +2495,18 @@ def create_reservation():
     date = data["date"].strip()
     time_range = data["time"].strip()
     reason = (data.get("reason") or "").strip()
-    schedule_error = validate_reservation_schedule(date, time_range)
-    if schedule_error:
-        return jsonify({"ok": False, "msg": schedule_error}), 400
-
-    lab_row = query("SELECT id, name FROM lab WHERE name=%s LIMIT 1", (lab_name,))
-    if not lab_row:
-        return jsonify({"ok": False, "msg": "lab not found"}), 404
-    lab_id = lab_row[0]["id"]
-
-    created_at = datetime.now().isoformat(timespec="seconds")
-
     try:
-        def _tx(cur):
-            lock_key = _reservation_lock_key(lab_name, date)
-            if not _acquire_named_lock(cur, lock_key):
-                raise BizError("reservation busy, try again", 409)
-            try:
-                if has_approved_conflict_with_cur(cur, lab_name, date, time_range):
-                    raise BizError("reservation conflict with approved", 409)
-                cur.execute(
-                    """
-                    INSERT INTO reservation (lab_id, lab_name, user_name, date, time, reason, status, reject_reason, created_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,'pending','',%s)
-                    """,
-                    (lab_id, lab_name, user_name, date, time_range, reason, created_at),
-                )
-                return cur.lastrowid
-            finally:
-                _release_named_lock(cur, lock_key)
-
-        new_id = run_in_transaction(_tx)
+        created = create_reservation_internal(
+            user_name=user_name,
+            lab_name=lab_name,
+            date=date,
+            time_range=time_range,
+            reason=reason,
+        )
     except BizError as e:
         return jsonify({"ok": False, "msg": e.msg}), e.status
 
-    return jsonify({"ok": True, "data": {"id": new_id}})
+    return jsonify({"ok": True, "data": {"id": created["id"]}})
 
 
 @app.post("/reservations/<int:rid>/cancel")
@@ -2497,6 +3230,96 @@ def notifications():
     for n in notices:
         n.pop("_sortAt", None)
     return jsonify(notices[:100])
+
+
+@app.get("/announcements")
+@auth_required()
+def get_announcements():
+    limit_raw = request.args.get("limit", "").strip()
+    try:
+        limit = int(limit_raw or "20")
+    except ValueError:
+        limit = 20
+    limit = max(1, min(limit, 100))
+
+    rows = query(
+        """
+        SELECT id,
+               title,
+               content,
+               publisher_name AS publisherName,
+               created_at AS createdAt
+        FROM announcement
+        ORDER BY id DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+    data = []
+    for row in rows:
+        data.append(
+            {
+                "id": row.get("id"),
+                "title": row.get("title") or "",
+                "content": row.get("content") or "",
+                "publisherName": row.get("publisherName") or "",
+                "createdAt": _to_text_time(row.get("createdAt")),
+                "type": "announcement",
+            }
+        )
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/announcements")
+@auth_required(roles=["admin"])
+def publish_announcement():
+    payload = request.get_json(force=True) or {}
+    title = str(payload.get("title") or "").strip()
+    content = str(payload.get("content") or "").strip()
+
+    if not title:
+        return jsonify({"ok": False, "msg": "title required"}), 400
+    if not content:
+        return jsonify({"ok": False, "msg": "content required"}), 400
+    if len(title) > 120:
+        return jsonify({"ok": False, "msg": "title too long"}), 400
+    if len(content) > 5000:
+        return jsonify({"ok": False, "msg": "content too long"}), 400
+
+    current_user = g.current_user or {}
+    publisher_id = _to_int_or_none(current_user.get("id"))
+    publisher_name = str(current_user.get("username") or "").strip()
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    new_id = execute_insert(
+        """
+        INSERT INTO announcement (title, content, publisher_id, publisher_name, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (title, content, publisher_id, publisher_name, created_at),
+    )
+
+    audit_log(
+        "admin.announcement.publish",
+        target_type="announcement",
+        target_id=new_id,
+        detail={"title": title},
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "id": new_id,
+                "title": title,
+                "content": content,
+                "publisherName": publisher_name,
+                "createdAt": created_at,
+                "type": "announcement",
+            },
+        }
+    )
 
 
 @app.post("/reservations/<int:rid>/approve")

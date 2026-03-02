@@ -1,5 +1,5 @@
 ﻿<template>
-  <view class="container reservePage">
+  <view class="container reservePage" :class="themeClass">
     <view class="stack">
       <view class="card heroCard">
         <view class="rowBetween heroTop">
@@ -45,6 +45,29 @@
         <textarea class="textareaBase" v-model="form.reason" placeholder="例如：数据结构实验教学" maxlength="255" />
         <view class="muted">{{ (form.reason || '').length }} / 255</view>
         <view class="fieldError" v-if="errors.reason">{{ errors.reason }}</view>
+      </view>
+
+      <view class="card aiCard">
+        <view class="rowBetween">
+          <view class="cardTitle">智能推荐</view>
+          <button class="btnSecondary miniBtn" size="mini" @click="fetchAiRecommendations">刷新推荐</button>
+        </view>
+        <view class="muted" v-if="aiLoading">正在计算推荐时段...</view>
+        <view class="muted" v-else-if="aiRecommendations.length === 0">暂无可用推荐，可尝试切换实验室或日期范围</view>
+        <view class="stack" v-else>
+          <view
+            class="recommendItem"
+            v-for="(item, idx) in aiRecommendations"
+            :key="`${item.date}-${item.time}-${idx}`"
+            @click="applyRecommendation(item)"
+          >
+            <view class="rowBetween">
+              <view class="recommendMain">{{ item.date }} {{ formatRecommendTime(item.time) }}</view>
+              <view class="statusTag info">score {{ Number(item.score || 0).toFixed(3) }}</view>
+            </view>
+            <view class="muted">智能推荐时段（点击可一键填充）</view>
+          </view>
+        </view>
       </view>
 
       <view class="card summaryCard">
@@ -98,15 +121,17 @@
 
 <script>
 import { BASE_URL } from "@/common/api.js"
+import { themePageMixin } from "@/common/theme.js"
 
 export default {
+  mixins: [themePageMixin],
   data() {
     return {
       labName: "未选择",
       labs: [],
       form: { user: "", date: "", time: [], reason: "" },
       timeSlotsMorning: ["8:00-8:40", "8:45-9:35", "10:25-11:05", "11:10-11:50"],
-      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30"],
+      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30", "7:00-7:40", "7:45-8:25"],
       showTimePicker: false,
       tempTimes: [],
       errors: {
@@ -122,7 +147,9 @@ export default {
         maxDaysAhead: 30,
         minTime: "08:00",
         maxTime: "22:00"
-      }
+      },
+      aiLoading: false,
+      aiRecommendations: []
     }
   },
   computed: {
@@ -139,6 +166,7 @@ export default {
   },
   onShow() {
     this.syncCurrentUser()
+    if (this.labs.length > 0) this.fetchAiRecommendations()
   },
   methods: {
     syncCurrentUser() {
@@ -160,10 +188,12 @@ export default {
             const exists = this.labs.find((l) => l.name === this.labName)
             if (!exists) this.labName = "未选择"
           }
+          this.fetchAiRecommendations()
         },
         fail: () => {
           uni.showToast({ title: "无法获取实验室", icon: "none" })
           this.labs = []
+          this.aiRecommendations = []
         }
       })
     },
@@ -189,6 +219,7 @@ export default {
       const lab = this.labs[idx]
       this.labName = lab ? lab.name : "未选择"
       this.errors.labName = ""
+      this.fetchAiRecommendations()
     },
     onDateChange(e) {
       this.form.date = e.detail.value
@@ -211,6 +242,62 @@ export default {
       this.form.time = [...this.tempTimes]
       this.showTimePicker = false
       this.errors.time = ""
+    },
+    getSelectedLab() {
+      if (!Array.isArray(this.labs) || this.labs.length === 0) return null
+      return this.labs.find((l) => l && l.name === this.labName) || null
+    },
+    fetchAiRecommendations() {
+      const user = this.syncCurrentUser()
+      if (!user) {
+        this.aiRecommendations = []
+        return
+      }
+
+      const lab = this.getSelectedLab()
+      const labId = lab && lab.id ? Number(lab.id) : 0
+      if (!labId) {
+        this.aiRecommendations = []
+        return
+      }
+
+      this.aiLoading = true
+      uni.request({
+        url: `${BASE_URL}/ai/recommend-slots?lab_id=${labId}&days=14&k=3`,
+        method: "GET",
+        success: (res) => {
+          const payload = res.data || {}
+          if (payload.code !== 0 || !payload.data || !Array.isArray(payload.data.recommendations)) {
+            this.aiRecommendations = []
+            return
+          }
+          this.aiRecommendations = payload.data.recommendations
+        },
+        fail: () => {
+          this.aiRecommendations = []
+        },
+        complete: () => {
+          this.aiLoading = false
+        }
+      })
+    },
+    applyRecommendation(item) {
+      if (!item || !item.date || !item.time) return
+      this.form.date = item.date
+      this.form.time = String(item.time)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+      this.errors.date = ""
+      this.errors.time = ""
+      uni.showToast({ title: "已填充推荐时段", icon: "none" })
+    },
+    formatRecommendTime(timeText) {
+      return String(timeText || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(" + ")
     },
     validateForm() {
       this.errors.labName = ""
@@ -310,8 +397,8 @@ export default {
 }
 
 .heroCard {
-  border: 1px solid rgba(22, 119, 255, 0.18);
-  background: linear-gradient(160deg, #ffffff 0%, #f2f7ff 100%);
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-bg-soft);
 }
 
 .heroTop {
@@ -319,16 +406,16 @@ export default {
 }
 
 .formCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .valueBox {
   font-weight: 600;
   padding: 10px 12px;
-  background: #f8fbff;
-  border: 1px solid #dbe5f0;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-primary);
   border-radius: 12px;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .timePickerRow {
@@ -346,13 +433,31 @@ export default {
 }
 
 .summaryCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
+}
+
+.aiCard {
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-bg-soft);
+}
+
+.recommendItem {
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+  padding: 10px;
+}
+
+.recommendMain {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .summaryLine {
   margin-top: 8px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .submitBtn {
@@ -383,15 +488,15 @@ export default {
 .slot {
   padding: 8px 10px;
   border-radius: 999px;
-  border: 1px solid #dbe3ef;
-  background: #f8fafc;
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-soft);
   font-size: 12px;
-  color: #334155;
+  color: var(--color-text-secondary);
 }
 
 .selected {
-  border-color: #bfdbfe;
-  background: #eaf3ff;
-  color: #1d4ed8;
+  border-color: var(--color-border-focus);
+  background: var(--color-info-soft);
+  color: var(--info);
 }
 </style>

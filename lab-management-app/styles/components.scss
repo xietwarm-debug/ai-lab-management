@@ -2,8 +2,8 @@
 @import "./mixins.scss";
 
 page {
-  background: linear-gradient(180deg, #f9fbff 0%, $bg-page 65%, #eef2f7 100%);
-  color: $gray-900;
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
   font-family: $font-sans;
 }
 
@@ -31,42 +31,42 @@ page {
 
 /* Typography */
 .title {
-  font-size: 24px;
+  font-size: $font-size-2xl;
   line-height: 32px;
   font-weight: 700;
   letter-spacing: 0.2px;
-  color: $gray-900;
+  color: var(--color-text-primary);
 }
 
 .subtitle {
   margin-top: $space-1;
-  font-size: 13px;
+  font-size: $font-size-sm;
   line-height: 20px;
-  color: $gray-500;
+  color: var(--color-text-muted);
 }
 
 .cardTitle {
-  font-size: 16px;
+  font-size: $font-size-lg;
   line-height: 24px;
   font-weight: 600;
-  color: $gray-900;
+  color: var(--color-text-primary);
 }
 
 .cardDesc {
   margin-top: $space-1;
-  font-size: 12px;
+  font-size: $font-size-xs;
   line-height: 18px;
-  color: $gray-500;
+  color: var(--color-text-muted);
 }
 
 .muted {
-  font-size: 12px;
-  color: $gray-500;
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
 }
 
 .label {
-  font-size: 12px;
-  color: $gray-500;
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
   margin: $space-2 0 $space-1;
 }
 
@@ -85,19 +85,19 @@ page {
 }
 
 .btnPrimary {
-  @include btn-solid($primary-500, #fff);
+  @include btn-solid(var(--color-primary), var(--color-text-inverse));
 }
 
 .btnSecondary {
-  @include btn-soft($gray-150, $gray-700, $gray-200);
+  @include btn-soft(var(--color-bg-soft), var(--color-text-secondary), var(--color-border-primary));
 }
 
 .btnGhost {
-  @include btn-soft(#fff, $gray-700, $gray-200);
+  @include btn-soft(var(--color-bg-card), var(--color-text-secondary), var(--color-border-primary));
 }
 
 .btnDanger {
-  @include btn-soft(#fff1f2, #b91c1c, #fecdd3);
+  @include btn-soft(var(--color-danger-soft), var(--danger), var(--color-border-primary));
 }
 
 /* Form */
@@ -123,14 +123,14 @@ page {
 
 .fieldError {
   margin-top: $space-1;
-  color: #b91c1c;
-  font-size: 12px;
+  color: var(--danger);
+  font-size: $font-size-xs;
   line-height: 18px;
 }
 
 .sectionTitle {
-  font-size: 12px;
-  color: $gray-500;
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
   margin: $space-2 0 $space-1;
 }
 
@@ -138,9 +138,9 @@ page {
   min-height: 36px;
   box-sizing: border-box;
   border-radius: $radius-md;
-  border: 1px solid $gray-200;
-  background: $gray-100;
-  color: $gray-700;
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-soft);
+  color: var(--color-text-secondary);
   padding: $space-2 $space-3;
 }
 
@@ -152,37 +152,37 @@ page {
   line-height: 26px;
   padding: 0 $space-3;
   border-radius: $radius-pill;
-  background: $gray-150;
-  border: 1px solid $gray-200;
-  color: $gray-700;
-  font-size: 12px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: $font-size-xs;
 }
 
 .statusTag {
-  @include status-tag(#eef2f7, #475569);
+  @include status-tag(var(--color-bg-soft), var(--color-text-secondary));
 }
 
 .statusTag.success {
-  @include status-tag(#eafaf0, #15803d);
+  @include status-tag(var(--color-success-soft), var(--success));
 }
 
 .statusTag.warning {
-  @include status-tag(#fff7e6, #b45309);
+  @include status-tag(var(--color-warning-soft), var(--warning));
 }
 
 .statusTag.danger {
-  @include status-tag(#fff1f2, #b91c1c);
+  @include status-tag(var(--color-danger-soft), var(--danger));
 }
 
 .statusTag.info {
-  @include status-tag(#eaf3ff, #1d4ed8);
+  @include status-tag(var(--color-info-soft), var(--info));
 }
 
 /* Modal */
 .modalMask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -192,18 +192,18 @@ page {
 .modalCard {
   width: 84%;
   max-width: 520px;
-  background: #fff;
+  background: var(--color-bg-card);
   border-radius: $radius-lg;
-  border: 1px solid $gray-200;
+  border: 1px solid var(--color-border-primary);
   box-shadow: $shadow-lg;
   padding: $space-3;
   box-sizing: border-box;
 }
 
 .modalTitle {
-  font-size: 16px;
+  font-size: $font-size-lg;
   font-weight: 700;
-  color: $gray-900;
+  color: var(--color-text-primary);
 }
 
 .modalActions {
@@ -215,17 +215,17 @@ page {
 
 /* Table */
 .table {
-  border: 1px solid $gray-200;
+  border: 1px solid var(--color-border-primary);
   border-radius: $radius-md;
   overflow: hidden;
-  background: #fff;
+  background: var(--color-bg-card);
 }
 
 .tableRow {
   display: flex;
   align-items: center;
   min-height: 42px;
-  border-bottom: 1px solid $gray-100;
+  border-bottom: 1px solid var(--color-border-soft);
 }
 
 .tableRow:last-child {
@@ -233,20 +233,20 @@ page {
 }
 
 .tableHead {
-  background: $gray-50;
-  color: $gray-500;
-  font-size: 12px;
+  background: var(--color-bg-soft);
+  color: var(--color-text-muted);
+  font-size: $font-size-xs;
   font-weight: 600;
 }
 
 .dataRow {
-  background: #fff;
+  background: var(--color-bg-card);
   transition: background 0.16s ease, transform 0.16s ease;
 }
 
 @media (hover: hover) {
   .dataRow:hover {
-    background: #f8fbff;
+    background: var(--color-bg-soft);
     transform: translateX(1px);
   }
 }
@@ -257,8 +257,8 @@ page {
   padding: $space-5 $space-4;
   text-align: center;
   border-radius: $radius-xl;
-  border: 1px dashed $gray-300;
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px dashed var(--color-border-primary);
+  background: var(--color-bg-card);
 }
 
 .emptyIcon {
@@ -268,20 +268,20 @@ page {
 
 .emptyTitle {
   margin-top: $space-2;
-  font-size: 15px;
+  font-size: $font-size-md;
   font-weight: 600;
-  color: $gray-700;
+  color: var(--color-text-secondary);
 }
 
 .emptySub {
   margin-top: $space-1;
-  font-size: 12px;
-  color: $gray-500;
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
 }
 
 .empty {
   text-align: center;
-  color: $gray-500;
+  color: var(--color-text-muted);
   margin-top: $space-8;
-  font-size: 12px;
+  font-size: $font-size-xs;
 }

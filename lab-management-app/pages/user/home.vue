@@ -94,7 +94,6 @@
           </view>
           <button class="btnSecondary miniBtn" size="mini" @click="refreshDashboard">刷新数据</button>
         </view>
-        <button class="btnDanger logoutBtn" @click="logout">退出登录</button>
       </view>
     </view>
   </view>
@@ -353,7 +352,7 @@ export default {
       uni.navigateTo({ url: "/pages/reserve/reserve" })
     },
     goMy() {
-      uni.navigateTo({ url: "/pages/my/my" })
+      uni.switchTab({ url: "/pages/my/my" })
     },
     goLostFound() {
       uni.navigateTo({ url: "/pages/lostfound/list" })
@@ -382,19 +381,6 @@ export default {
       if (status === "claim_approved") return "认领通过"
       if (status === "claim_rejected") return "认领驳回"
       return status || "-"
-    },
-    logout() {
-      const s = uni.getStorageSync("session") || {}
-      uni.request({
-        url: `${BASE_URL}/auth/logout`,
-        method: "POST",
-        header: { "Content-Type": "application/json" },
-        data: { refreshToken: s.refreshToken || "" },
-        complete: () => {
-          uni.removeStorageSync("session")
-          uni.reLaunch({ url: "/pages/login/login" })
-        }
-      })
     }
   }
 }
@@ -697,10 +683,5 @@ export default {
 
 .accountCard {
   border: 1px solid rgba(31, 77, 143, 0.1);
-}
-
-.logoutBtn {
-  margin-top: 10px;
-  width: 100%;
 }
 </style>

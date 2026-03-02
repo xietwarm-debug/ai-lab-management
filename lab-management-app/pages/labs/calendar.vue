@@ -87,7 +87,7 @@ export default {
       date: "",
       loading: false,
       timeSlotsMorning: ["8:00-8:40", "8:45-9:35", "10:25-11:05", "11:10-11:50"],
-      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30"],
+      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30", "7:00-7:40", "7:45-8:25"],
       bookedSet: new Set(),
       rules: {
         minDate: "",

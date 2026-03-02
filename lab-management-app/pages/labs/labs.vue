@@ -1,5 +1,5 @@
 ﻿<template>
-  <view class="container labsPage">
+  <view class="container labsPage" :class="themeClass">
     <view class="stack">
       <view class="card heroCard">
         <view class="rowBetween heroTop">
@@ -95,6 +95,7 @@
 
 <script>
 import { BASE_URL } from "@/common/api.js"
+import { themePageMixin } from "@/common/theme.js"
 
 const FALLBACK_BG = [
   "linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%)",
@@ -105,7 +106,17 @@ const FALLBACK_BG = [
   "linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)"
 ]
 
+const FALLBACK_BG_DARK = [
+  "linear-gradient(135deg, #1d3558 0%, #254467 100%)",
+  "linear-gradient(135deg, #1b3a2c 0%, #24503a 100%)",
+  "linear-gradient(135deg, #33234f 0%, #3c2d5c 100%)",
+  "linear-gradient(135deg, #4a351f 0%, #5a4128 100%)",
+  "linear-gradient(135deg, #4a2330 0%, #5e2d3c 100%)",
+  "linear-gradient(135deg, #252d5a 0%, #323b69 100%)"
+]
+
 export default {
+  mixins: [themePageMixin],
   data() {
     return {
       keyword: "",
@@ -140,7 +151,8 @@ export default {
     },
     fallbackStyle(lab) {
       const idx = Number(lab.id || 0) % FALLBACK_BG.length
-      return { backgroundImage: FALLBACK_BG[idx] }
+      const darkMode = String(this.themeClass || "").includes("theme-dark")
+      return { backgroundImage: darkMode ? FALLBACK_BG_DARK[idx] : FALLBACK_BG[idx] }
     },
     onCardTouchStart(id) {
       this.activeCardId = id
@@ -205,8 +217,8 @@ export default {
 }
 
 .heroCard {
-  border: 1px solid rgba(22, 119, 255, 0.18);
-  background: linear-gradient(160deg, #ffffff 0%, #f2f7ff 100%);
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-bg-soft);
 }
 
 .heroTop {
@@ -226,21 +238,21 @@ export default {
 }
 
 .searchCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .searchInputWrap {
   display: flex;
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #dfe4ea;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
   border-radius: 12px;
   padding: 0 10px;
 }
 
 .searchIcon {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   margin-right: 6px;
 }
 
@@ -248,11 +260,11 @@ export default {
   flex: 1;
   height: 36px;
   font-size: 13px;
-  color: #1f2937;
+  color: var(--color-text-primary);
 }
 
 .clearIcon {
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 12px;
   padding: 4px 2px;
 }
@@ -270,17 +282,17 @@ export default {
 }
 
 .labCard {
-  background: #ffffff;
-  border: 1px solid #e5eaf0;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--shadow-sm);
   transform: scale(1);
   transition: transform 0.16s ease, box-shadow 0.16s ease;
 
   &.pressed {
     transform: scale(0.98);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+    box-shadow: var(--shadow-md);
   }
 }
 
@@ -288,7 +300,7 @@ export default {
   position: relative;
   width: 100%;
   padding-top: 56.25%;
-  background: #f1f5f9;
+  background: var(--color-bg-soft);
 }
 
 .coverImage,
@@ -307,7 +319,7 @@ export default {
 }
 
 .fallbackText {
-  color: rgba(30, 41, 59, 0.75);
+  color: var(--color-text-secondary);
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 1px;
@@ -327,7 +339,7 @@ export default {
 .labName {
   flex: 1;
   min-width: 0;
-  color: #0f172a;
+  color: var(--color-text-primary);
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
@@ -335,18 +347,18 @@ export default {
 }
 
 .statusTag.success {
-  background: #e8fff0;
-  color: #15803d;
+  background: var(--color-success-soft);
+  color: var(--success);
 }
 
 .statusTag.danger {
-  background: #ffecec;
-  color: #b91c1c;
+  background: var(--color-danger-soft);
+  color: var(--danger);
 }
 
 .metaRow {
   margin-top: 7px;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -358,7 +370,7 @@ export default {
 
 .desc {
   margin-top: 6px;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-size: 11px;
   line-height: 1.35;
   max-height: 30px;
@@ -367,22 +379,22 @@ export default {
 
 .hint {
   margin-top: 8px;
-  color: #8b97a8;
+  color: var(--color-text-muted);
   font-size: 10px;
 }
 
 .skeletonCard {
   border-radius: 14px;
   padding: 10px;
-  background: #ffffff;
-  border: 1px solid #e5eaf0;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
 }
 
 .skeleton {
   position: relative;
   overflow: hidden;
   border-radius: 10px;
-  background: #eef2f7;
+  background: var(--color-bg-soft);
 }
 
 .skeleton::after {
@@ -392,7 +404,7 @@ export default {
   top: 0;
   width: 120%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.68), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
   animation: shimmer 1.2s infinite;
 }
 

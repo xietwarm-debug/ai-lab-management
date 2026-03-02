@@ -44,6 +44,31 @@
 
       <view class="card">
         <view class="rowBetween sectionHeader">
+          <view class="cardTitle">公告发布</view>
+          <view class="muted">发布后会出现在用户动态</view>
+        </view>
+        <input
+          class="inputBase"
+          v-model.trim="announcementTitle"
+          maxlength="120"
+          placeholder="请输入公告标题"
+        />
+        <textarea
+          class="textareaBase announcementArea"
+          v-model.trim="announcementContent"
+          maxlength="5000"
+          placeholder="请输入公告内容"
+        />
+        <view class="rowBetween announcementActions">
+          <view class="muted">标题必填，内容必填</view>
+          <button class="btnPrimary miniBtn" size="mini" :loading="publishing" @click="publishAnnouncement">
+            发布公告
+          </button>
+        </view>
+      </view>
+
+      <view class="card">
+        <view class="rowBetween sectionHeader">
           <view>
             <view class="cardTitle">待审批预约</view>
             <view class="muted">展示最近 6 条</view>
@@ -109,7 +134,10 @@ export default {
       loadingPreview: false,
       lastUpdated: "",
       timer: null,
-      refreshing: false
+      refreshing: false,
+      announcementTitle: "",
+      announcementContent: "",
+      publishing: false
     }
   },
   computed: {
@@ -313,6 +341,40 @@ export default {
     goLostFound() {
       uni.navigateTo({ url: "/pages/admin/lostfound" })
     },
+    async publishAnnouncement() {
+      const title = String(this.announcementTitle || "").trim()
+      const content = String(this.announcementContent || "").trim()
+      if (!title) {
+        uni.showToast({ title: "请输入公告标题", icon: "none" })
+        return
+      }
+      if (!content) {
+        uni.showToast({ title: "请输入公告内容", icon: "none" })
+        return
+      }
+      if (this.publishing) return
+      this.publishing = true
+      try {
+        const res = await uni.request({
+          url: `${BASE_URL}/announcements`,
+          method: "POST",
+          header: { "Content-Type": "application/json" },
+          data: { title, content }
+        })
+        const payload = (res && res.data) || {}
+        if (!payload.ok) {
+          uni.showToast({ title: payload.msg || "发布失败", icon: "none" })
+          return
+        }
+        this.announcementTitle = ""
+        this.announcementContent = ""
+        uni.showToast({ title: "公告已发布", icon: "success" })
+      } catch (e) {
+        uni.showToast({ title: "发布失败，请稍后重试", icon: "none" })
+      } finally {
+        this.publishing = false
+      }
+    },
     logout() {
       const s = uni.getStorageSync("session") || {}
       uni.request({
@@ -360,6 +422,16 @@ export default {
 
 .heroMeta {
   margin-top: 6px;
+}
+
+.announcementArea {
+  margin-top: 8px;
+  min-height: 96px;
+}
+
+.announcementActions {
+  margin-top: 10px;
+  align-items: center;
 }
 
 .sectionHeader {

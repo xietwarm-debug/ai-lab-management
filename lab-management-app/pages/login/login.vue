@@ -192,7 +192,7 @@ export default {
         uni.reLaunch({ url: "/pages/admin/admin" })
         return
       }
-      uni.reLaunch({ url: "/pages/user/home" })
+      uni.switchTab({ url: "/pages/index/index" })
     }
   }
 }

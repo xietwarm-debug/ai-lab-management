@@ -1,5 +1,5 @@
 ﻿<template>
-  <view class="container notifyPage">
+  <view class="container notifyPage" :class="themeClass">
     <view class="stack">
       <view class="card heroCard">
         <view class="rowBetween heroTop">
@@ -74,6 +74,7 @@
 
 <script>
 import { BASE_URL } from "@/common/api.js"
+import { themePageMixin } from "@/common/theme.js"
 
 function getReadKeys(username) {
   return {
@@ -89,6 +90,7 @@ function sortByCreatedAtDesc(rows) {
 }
 
 export default {
+  mixins: [themePageMixin],
   data() {
     return {
       list: [],
@@ -235,8 +237,8 @@ export default {
 }
 
 .heroCard {
-  border: 1px solid rgba(22, 119, 255, 0.2);
-  background: linear-gradient(155deg, #ffffff 0%, #eef6ff 60%, #e7f0ff 100%);
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-bg-soft);
 }
 
 .heroTop {
@@ -261,17 +263,17 @@ export default {
 .heroMetaItem {
   height: 25px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-card);
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
   font-size: 11px;
-  color: #334155;
+  color: var(--color-text-secondary);
 }
 
 .toolbarCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .filterChips {
@@ -286,9 +288,9 @@ export default {
 }
 
 .chipOn {
-  border-color: #bfdbfe;
-  background: #eaf3ff;
-  color: #1d4ed8;
+  border-color: var(--color-border-focus);
+  background: var(--color-info-soft);
+  color: var(--info);
 }
 
 .summaryText {
@@ -302,12 +304,12 @@ export default {
 }
 
 .noticeItem {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .noticeItem.unread {
-  border-color: rgba(220, 38, 38, 0.28);
-  box-shadow: 0 8px 20px rgba(220, 38, 38, 0.08);
+  border-color: var(--danger);
+  box-shadow: var(--shadow-sm);
 }
 
 .noticeHead {
@@ -320,7 +322,7 @@ export default {
 .noticeName {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -333,14 +335,14 @@ export default {
   padding: 0 7px;
   font-size: 10px;
   font-weight: 600;
-  background: #eaf3ff;
-  color: #1d4ed8;
+  background: var(--color-info-soft);
+  color: var(--info);
   flex-shrink: 0;
 }
 
 .typeTag.lostfound {
-  background: #fff7e6;
-  color: #9a5d00;
+  background: var(--color-warning-soft);
+  color: var(--warning);
 }
 
 .noticeRight {
@@ -349,7 +351,7 @@ export default {
 
 .noticeMessage {
   margin-top: 6px;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 18px;
 }
@@ -369,6 +371,6 @@ export default {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #dc2626;
+  background: var(--danger);
 }
 </style>

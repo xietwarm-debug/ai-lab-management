@@ -1,5 +1,5 @@
 ﻿<template>
-  <view class="container lostPage">
+  <view class="container lostPage" :class="themeClass">
     <view class="stack">
       <view class="card heroCard">
         <view class="rowBetween heroTop">
@@ -111,8 +111,10 @@
 
 <script>
 import { BASE_URL } from "@/common/api.js"
+import { themePageMixin } from "@/common/theme.js"
 
 export default {
+  mixins: [themePageMixin],
   data() {
     return {
       list: [],
@@ -291,8 +293,8 @@ export default {
 }
 
 .heroCard {
-  border: 1px solid rgba(22, 119, 255, 0.18);
-  background: linear-gradient(160deg, #ffffff 0%, #f2f7ff 100%);
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-bg-soft);
 }
 
 .heroTop {
@@ -312,7 +314,7 @@ export default {
 }
 
 .filterCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .chipRow {
@@ -327,9 +329,9 @@ export default {
 }
 
 .chipOn {
-  border-color: #bfdbfe;
-  background: #eaf3ff;
-  color: #1d4ed8;
+  border-color: var(--color-border-focus);
+  background: var(--color-info-soft);
+  color: var(--info);
 }
 
 .loadingCard {
@@ -339,13 +341,13 @@ export default {
 }
 
 .lostItem {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .itemName {
   font-size: 14px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .typeTag {
@@ -355,23 +357,23 @@ export default {
   padding: 0 8px;
   font-size: 11px;
   font-weight: 600;
-  background: #eef2f7;
-  color: #475569;
+  background: var(--color-bg-soft);
+  color: var(--color-text-secondary);
 }
 
 .typeTag.lost {
-  background: #fff7e6;
-  color: #9a5d00;
+  background: var(--color-warning-soft);
+  color: var(--warning);
 }
 
 .typeTag.found {
-  background: #e8fff0;
-  color: #1f7a3a;
+  background: var(--color-success-soft);
+  color: var(--success);
 }
 
 .meta {
   margin-top: 6px;
-  color: #64748b;
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 18px;
 }
@@ -392,7 +394,7 @@ export default {
 }
 
 .actionCard {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border-primary);
 }
 
 .actionBtn {
