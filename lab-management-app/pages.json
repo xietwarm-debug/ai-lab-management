@@ -1,0 +1,140 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": { "navigationBarTitleText": "登录" }
+    },
+    {
+      "path": "pages/index/index",
+      "style": { "navigationBarTitleText": "首页" }
+    },
+    {
+      "path": "pages/feed/feed",
+      "style": { "navigationBarTitleText": "动态" }
+    },
+    {
+      "path": "pages/notifications/list",
+      "style": { "navigationBarTitleText": "通知中心" }
+    },
+    {
+      "path": "pages/my/my",
+      "style": { "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/my/reservations",
+      "style": { "navigationBarTitleText": "我的预约" }
+    },
+    {
+      "path": "pages/my/profile",
+      "style": { "navigationBarTitleText": "用户信息" }
+    },
+    {
+      "path": "pages/settings/settings",
+      "style": { "navigationBarTitleText": "账号设置" }
+    },
+    {
+      "path": "pages/user/home",
+      "style": { "navigationBarTitleText": "用户首页" }
+    },
+    {
+      "path": "pages/labs/labs",
+      "style": { "navigationBarTitleText": "实验室列表" }
+    },
+    {
+      "path": "pages/labs/detail",
+      "style": { "navigationBarTitleText": "实验室详情" }
+    },
+    {
+      "path": "pages/labs/calendar",
+      "style": { "navigationBarTitleText": "实验室日历" }
+    },
+    {
+      "path": "pages/lostfound/list",
+      "style": { "navigationBarTitleText": "失物招领" }
+    },
+    {
+      "path": "pages/lostfound/post",
+      "style": { "navigationBarTitleText": "发布失物" }
+    },
+    {
+      "path": "pages/reserve/reserve",
+      "style": { "navigationBarTitleText": "预约实验室" }
+    },
+    {
+      "path": "pages/agent/agent",
+      "style": { "navigationBarTitleText": "智能助手" }
+    },
+    {
+      "path": "pages/admin/admin",
+      "style": {
+        "navigationBarTitleText": "管理员",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/admin/labs",
+      "style": { "navigationBarTitleText": "实验室管理" }
+    },
+    {
+      "path": "pages/admin/lab-edit",
+      "style": { "navigationBarTitleText": "编辑实验室" }
+    },
+    {
+      "path": "pages/admin/lostfound",
+      "style": { "navigationBarTitleText": "失物招领管理" }
+    },
+    {
+      "path": "pages/admin/approve",
+      "style": { "navigationBarTitleText": "预约审批" }
+    },
+    {
+      "path": "pages/admin/approve-detail",
+      "style": { "navigationBarTitleText": "预约详情" }
+    },
+    {
+      "path": "pages/admin/audit",
+      "style": { "navigationBarTitleText": "审计日志" }
+    },
+    {
+      "path": "pages/admin/stats",
+      "style": { "navigationBarTitleText": "后台数据" }
+    },
+    {
+      "path": "pages/admin/users",
+      "style": { "navigationBarTitleText": "用户管理" }
+    }
+  ],
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#1677ff",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "static/logo.png",
+        "selectedIconPath": "static/logo.png"
+      },
+      {
+        "pagePath": "pages/agent/agent",
+        "text": "AI助手",
+        "iconPath": "static/logo.png",
+        "selectedIconPath": "static/logo.png"
+      },
+      {
+        "pagePath": "pages/my/my",
+        "text": "我的",
+        "iconPath": "static/logo.png",
+        "selectedIconPath": "static/logo.png"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "uni-app",
+    "navigationBarBackgroundColor": "#F8F8F8",
+    "backgroundColor": "#F8F8F8"
+  },
+  "uniIdRouter": {}
+}

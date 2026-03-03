@@ -1,0 +1,297 @@
+/* AIlab Design Tokens v2.0 */
+
+/* Light palette */
+$light-primary-50: #eef6ff;
+$light-primary-100: #dbeafe;
+$light-primary-200: #bfdbfe;
+$light-primary-500: #1677ff;
+$light-primary-600: #145fe0;
+$light-primary-700: #1d4ed8;
+
+$light-gray-50: #f8fafc;
+$light-gray-100: #f1f5f9;
+$light-gray-150: #eef2f7;
+$light-gray-200: #e6ebf2;
+$light-gray-300: #cbd5e1;
+$light-gray-400: #98a2b3;
+$light-gray-500: #667085;
+$light-gray-700: #334155;
+$light-gray-900: #0f172a;
+
+$light-success: #16a34a;
+$light-warning: #d97706;
+$light-danger: #dc2626;
+$light-info: $light-primary-500;
+
+$light-bg-page: #f5f7fb;
+$light-bg-card: #ffffff;
+$light-bg-soft: #f8fafc;
+$light-bg-overlay: rgba(15, 23, 42, 0.42);
+
+$light-border-primary: #e6ebf2;
+$light-border-soft: #f1f5f9;
+$light-border-focus: rgba(22, 119, 255, 0.2);
+
+$light-text-primary: #0f172a;
+$light-text-secondary: #334155;
+$light-text-muted: #667085;
+$light-text-inverse: #ffffff;
+$light-success-soft: #eafaf0;
+$light-warning-soft: #fff7e6;
+$light-danger-soft: #fff1f2;
+$light-info-soft: #eaf3ff;
+
+$light-shadow-sm: 0 4px 12px rgba(15, 23, 42, 0.06);
+$light-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+$light-shadow-lg: 0 14px 30px rgba(15, 23, 42, 0.1);
+
+/* Dark palette */
+$dark-primary-50: #102744;
+$dark-primary-100: #12335b;
+$dark-primary-200: #164a87;
+$dark-primary-500: #5ca2ff;
+$dark-primary-600: #78b2ff;
+$dark-primary-700: #9bc7ff;
+
+$dark-gray-50: #0d1118;
+$dark-gray-100: #141b25;
+$dark-gray-150: #1a2330;
+$dark-gray-200: #263142;
+$dark-gray-300: #344155;
+$dark-gray-400: #6e7c91;
+$dark-gray-500: #9aa7ba;
+$dark-gray-700: #d2dae6;
+$dark-gray-900: #f5f8ff;
+
+$dark-success: #4bd78a;
+$dark-warning: #f0b35f;
+$dark-danger: #f37c7c;
+$dark-info: $dark-primary-500;
+
+$dark-bg-page: #0a1018;
+$dark-bg-card: #141d2a;
+$dark-bg-soft: #1a2433;
+$dark-bg-overlay: rgba(4, 8, 14, 0.62);
+
+$dark-border-primary: #263142;
+$dark-border-soft: #1e2836;
+$dark-border-focus: rgba(92, 162, 255, 0.3);
+
+$dark-text-primary: #f5f8ff;
+$dark-text-secondary: #d2dae6;
+$dark-text-muted: #9aa7ba;
+$dark-text-inverse: #0d1118;
+$dark-success-soft: #173626;
+$dark-warning-soft: #3b2d1a;
+$dark-danger-soft: #3f2027;
+$dark-info-soft: #193356;
+
+$dark-shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.28);
+$dark-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.34);
+$dark-shadow-lg: 0 18px 36px rgba(0, 0, 0, 0.42);
+
+/* Typography */
+$font-sans: var(--font-family-sans);
+$font-mono: var(--font-family-mono);
+
+$font-size-xs: var(--font-size-xs);
+$font-size-sm: var(--font-size-sm);
+$font-size-md: var(--font-size-md);
+$font-size-lg: var(--font-size-lg);
+$font-size-xl: var(--font-size-xl);
+$font-size-2xl: var(--font-size-2xl);
+
+/* Spacing scale (4pt grid) */
+$space-0: var(--space-0);
+$space-1: var(--space-1);
+$space-2: var(--space-2);
+$space-3: var(--space-3);
+$space-4: var(--space-4);
+$space-5: var(--space-5);
+$space-6: var(--space-6);
+$space-8: var(--space-8);
+$space-10: var(--space-10);
+$space-12: var(--space-12);
+
+/* Radius */
+$radius-xs: var(--radius-xs);
+$radius-sm: var(--radius-sm);
+$radius-md: var(--radius-md);
+$radius-lg: var(--radius-lg);
+$radius-xl: var(--radius-xl);
+$radius-pill: var(--radius-pill);
+
+/* Effects */
+$shadow-sm: var(--shadow-sm);
+$shadow-md: var(--shadow-md);
+$shadow-lg: var(--shadow-lg);
+
+/* Layer */
+$z-overlay: 900;
+$z-modal: 999;
+
+/* Legacy color aliases (keep existing pages/mixins compatible) */
+$primary-50: var(--primary-50);
+$primary-100: var(--primary-100);
+$primary-200: var(--primary-200);
+$primary-500: var(--primary-500);
+$primary-600: var(--primary-600);
+$primary-700: var(--primary-700);
+
+$gray-50: var(--gray-50);
+$gray-100: var(--gray-100);
+$gray-150: var(--gray-150);
+$gray-200: var(--gray-200);
+$gray-300: var(--gray-300);
+$gray-400: var(--gray-400);
+$gray-500: var(--gray-500);
+$gray-700: var(--gray-700);
+$gray-900: var(--gray-900);
+
+$success: var(--success);
+$warning: var(--warning);
+$danger: var(--danger);
+$info: var(--info);
+
+$bg-page: var(--bg-page);
+$bg-card: var(--bg-card);
+$bg-soft: var(--bg-soft);
+
+/* Runtime CSS variables */
+:root,
+.theme-light,
+page.theme-light,
+[data-theme="light"] {
+  --primary-50: #{$light-primary-50};
+  --primary-100: #{$light-primary-100};
+  --primary-200: #{$light-primary-200};
+  --primary-500: #{$light-primary-500};
+  --primary-600: #{$light-primary-600};
+  --primary-700: #{$light-primary-700};
+
+  --gray-50: #{$light-gray-50};
+  --gray-100: #{$light-gray-100};
+  --gray-150: #{$light-gray-150};
+  --gray-200: #{$light-gray-200};
+  --gray-300: #{$light-gray-300};
+  --gray-400: #{$light-gray-400};
+  --gray-500: #{$light-gray-500};
+  --gray-700: #{$light-gray-700};
+  --gray-900: #{$light-gray-900};
+
+  --success: #{$light-success};
+  --warning: #{$light-warning};
+  --danger: #{$light-danger};
+  --info: #{$light-info};
+
+  --bg-page: #{$light-bg-page};
+  --bg-card: #{$light-bg-card};
+  --bg-soft: #{$light-bg-soft};
+  --bg-overlay: #{$light-bg-overlay};
+
+  --color-primary: #{$light-primary-500};
+  --color-primary-strong: #{$light-primary-600};
+  --color-bg-page: #{$light-bg-page};
+  --color-bg-card: #{$light-bg-card};
+  --color-bg-soft: #{$light-bg-soft};
+  --color-border-primary: #{$light-border-primary};
+  --color-border-soft: #{$light-border-soft};
+  --color-border-focus: #{$light-border-focus};
+  --color-text-primary: #{$light-text-primary};
+  --color-text-secondary: #{$light-text-secondary};
+  --color-text-muted: #{$light-text-muted};
+  --color-text-inverse: #{$light-text-inverse};
+  --color-success-soft: #{$light-success-soft};
+  --color-warning-soft: #{$light-warning-soft};
+  --color-danger-soft: #{$light-danger-soft};
+  --color-info-soft: #{$light-info-soft};
+
+  --font-family-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-family-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-size-xs: 22rpx;
+  --font-size-sm: 24rpx;
+  --font-size-md: 26rpx;
+  --font-size-lg: 30rpx;
+  --font-size-xl: 34rpx;
+  --font-size-2xl: 42rpx;
+
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  --shadow-sm: #{$light-shadow-sm};
+  --shadow-md: #{$light-shadow-md};
+  --shadow-lg: #{$light-shadow-lg};
+
+  --motion-fast: 160ms;
+  --motion-medium: 260ms;
+  --motion-slow: 420ms;
+  --motion-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-dark,
+page.theme-dark,
+[data-theme="dark"] {
+  --primary-50: #{$dark-primary-50};
+  --primary-100: #{$dark-primary-100};
+  --primary-200: #{$dark-primary-200};
+  --primary-500: #{$dark-primary-500};
+  --primary-600: #{$dark-primary-600};
+  --primary-700: #{$dark-primary-700};
+
+  --gray-50: #{$dark-gray-50};
+  --gray-100: #{$dark-gray-100};
+  --gray-150: #{$dark-gray-150};
+  --gray-200: #{$dark-gray-200};
+  --gray-300: #{$dark-gray-300};
+  --gray-400: #{$dark-gray-400};
+  --gray-500: #{$dark-gray-500};
+  --gray-700: #{$dark-gray-700};
+  --gray-900: #{$dark-gray-900};
+
+  --success: #{$dark-success};
+  --warning: #{$dark-warning};
+  --danger: #{$dark-danger};
+  --info: #{$dark-info};
+
+  --bg-page: #{$dark-bg-page};
+  --bg-card: #{$dark-bg-card};
+  --bg-soft: #{$dark-bg-soft};
+  --bg-overlay: #{$dark-bg-overlay};
+
+  --color-primary: #{$dark-primary-500};
+  --color-primary-strong: #{$dark-primary-600};
+  --color-bg-page: #{$dark-bg-page};
+  --color-bg-card: #{$dark-bg-card};
+  --color-bg-soft: #{$dark-bg-soft};
+  --color-border-primary: #{$dark-border-primary};
+  --color-border-soft: #{$dark-border-soft};
+  --color-border-focus: #{$dark-border-focus};
+  --color-text-primary: #{$dark-text-primary};
+  --color-text-secondary: #{$dark-text-secondary};
+  --color-text-muted: #{$dark-text-muted};
+  --color-text-inverse: #{$dark-text-inverse};
+  --color-success-soft: #{$dark-success-soft};
+  --color-warning-soft: #{$dark-warning-soft};
+  --color-danger-soft: #{$dark-danger-soft};
+  --color-info-soft: #{$dark-info-soft};
+
+  --shadow-sm: #{$dark-shadow-sm};
+  --shadow-md: #{$dark-shadow-md};
+  --shadow-lg: #{$dark-shadow-lg};
+}

@@ -1,0 +1,72 @@
+@import "./tokens.scss";
+
+@mixin focus-ring($ring-color: var(--color-border-focus)) {
+  outline: none;
+  box-shadow: 0 0 0 3px $ring-color;
+}
+
+@mixin card-surface {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+}
+
+@mixin btn-base($height: 36px, $font-size: $font-size-sm) {
+  height: $height;
+  line-height: $height;
+  border-radius: $radius-md;
+  font-size: $font-size;
+  padding: 0 $space-3;
+  border: 1px solid transparent;
+  transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
+  box-sizing: border-box;
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+@mixin btn-solid($bg, $fg: #fff) {
+  background: $bg;
+  color: $fg;
+
+  &:active {
+    filter: brightness(0.96);
+  }
+}
+
+@mixin btn-soft($bg, $fg, $border-color: transparent) {
+  background: $bg;
+  color: $fg;
+  border-color: $border-color;
+
+  &:active {
+    filter: brightness(0.98);
+  }
+}
+
+@mixin input-base($height: 36px) {
+  min-height: $height;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-primary);
+  border-radius: $radius-md;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  padding: 0 $space-3;
+  font-size: $font-size-sm;
+}
+
+@mixin status-tag($bg, $fg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  line-height: 22px;
+  padding: 0 $space-2;
+  border-radius: $radius-pill;
+  background: $bg;
+  color: $fg;
+  font-size: $font-size-xs;
+  font-weight: 600;
+}

@@ -1,0 +1,22 @@
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Local runtime data
+lab-api/uploads/
+
+# Uni-App build output
+lab-management-app/unpackage/
+
+# IDE and OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

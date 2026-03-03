@@ -1,0 +1,415 @@
+@import "./tokens.scss";
+@import "./mixins.scss";
+
+page {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+  font-family: $font-sans;
+  animation: motion-fade-in var(--motion-medium) var(--motion-ease-out) both;
+}
+
+@keyframes motion-page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-pop-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Layout */
+.container {
+  padding: $space-4;
+  animation: motion-fade-in var(--motion-medium) var(--motion-ease-out) both;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+}
+
+.stack > .card,
+.stack > .section,
+.stack > .emptyState {
+  animation: motion-fade-up var(--motion-medium) var(--motion-ease-out) both;
+}
+
+.stack > :nth-child(1) { animation-delay: 24ms; }
+.stack > :nth-child(2) { animation-delay: 56ms; }
+.stack > :nth-child(3) { animation-delay: 88ms; }
+.stack > :nth-child(4) { animation-delay: 120ms; }
+.stack > :nth-child(5) { animation-delay: 152ms; }
+.stack > :nth-child(6) { animation-delay: 184ms; }
+
+.section {
+  @include card-surface;
+  padding: $space-4;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out);
+  will-change: transform, box-shadow;
+}
+
+.rowBetween {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Typography */
+.title {
+  font-size: $font-size-2xl;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  margin-top: $space-1;
+  font-size: $font-size-sm;
+  line-height: 20px;
+  color: var(--color-text-muted);
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.cardDesc {
+  margin-top: $space-1;
+  font-size: $font-size-xs;
+  line-height: 18px;
+  color: var(--color-text-muted);
+}
+
+.muted {
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
+}
+
+.label {
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
+  margin: $space-2 0 $space-1;
+}
+
+/* Card */
+.card {
+  @include card-surface;
+  padding: $space-3;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out);
+  will-change: transform, box-shadow;
+}
+
+@media (hover: hover) {
+  .card:hover,
+  .section:hover {
+    transform: translate3d(0, -2px, 0);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* Button */
+.btnPrimary,
+.btnSecondary,
+.btnGhost,
+.btnDanger {
+  @include btn-base();
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.btnPrimary {
+  @include btn-solid(var(--color-primary), var(--color-text-inverse));
+}
+
+.btnSecondary {
+  @include btn-soft(var(--color-bg-soft), var(--color-text-secondary), var(--color-border-primary));
+}
+
+.btnGhost {
+  @include btn-soft(var(--color-bg-card), var(--color-text-secondary), var(--color-border-primary));
+}
+
+.btnDanger {
+  @include btn-soft(var(--color-danger-soft), var(--danger), var(--color-border-primary));
+}
+
+/* Form */
+.inputBase {
+  @include input-base(36px);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.input {
+  @include input-base(36px);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.textareaBase {
+  @include input-base(80px);
+  padding: $space-2 $space-3;
+  line-height: 1.4;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.textarea {
+  @include input-base(80px);
+  padding: $space-2 $space-3;
+  line-height: 1.4;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out),
+    transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.inputBase:focus,
+.input:focus,
+.textareaBase:focus,
+.textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-border-focus);
+  transform: translate3d(0, -1px, 0);
+}
+
+.fieldError {
+  margin-top: $space-1;
+  color: var(--danger);
+  font-size: $font-size-xs;
+  line-height: 18px;
+}
+
+.sectionTitle {
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
+  margin: $space-2 0 $space-1;
+}
+
+.calendarBtn {
+  min-height: 36px;
+  box-sizing: border-box;
+  border-radius: $radius-md;
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-soft);
+  color: var(--color-text-secondary);
+  padding: $space-2 $space-3;
+}
+
+/* Tag / Chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  line-height: 26px;
+  padding: 0 $space-3;
+  border-radius: $radius-pill;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: $font-size-xs;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-fast) var(--motion-ease-out);
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.statusTag {
+  @include status-tag(var(--color-bg-soft), var(--color-text-secondary));
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-fast) var(--motion-ease-out);
+}
+
+.statusTag.success {
+  @include status-tag(var(--color-success-soft), var(--success));
+}
+
+.statusTag.warning {
+  @include status-tag(var(--color-warning-soft), var(--warning));
+}
+
+.statusTag.danger {
+  @include status-tag(var(--color-danger-soft), var(--danger));
+}
+
+.statusTag.info {
+  @include status-tag(var(--color-info-soft), var(--info));
+}
+
+/* Modal */
+.modalMask {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+  animation: motion-fade-in var(--motion-fast) var(--motion-ease-out) both;
+}
+
+.modalCard {
+  width: 84%;
+  max-width: 520px;
+  background: var(--color-bg-card);
+  border-radius: $radius-lg;
+  border: 1px solid var(--color-border-primary);
+  box-shadow: $shadow-lg;
+  padding: $space-3;
+  box-sizing: border-box;
+  animation: motion-pop-in var(--motion-medium) var(--motion-ease-spring) both;
+}
+
+.modalTitle {
+  font-size: $font-size-lg;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.modalActions {
+  margin-top: $space-3;
+  display: flex;
+  justify-content: flex-end;
+  gap: $space-2;
+}
+
+/* Table */
+.table {
+  border: 1px solid var(--color-border-primary);
+  border-radius: $radius-md;
+  overflow: hidden;
+  background: var(--color-bg-card);
+}
+
+.tableRow {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableHead {
+  background: var(--color-bg-soft);
+  color: var(--color-text-muted);
+  font-size: $font-size-xs;
+  font-weight: 600;
+}
+
+.dataRow {
+  background: var(--color-bg-card);
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+@media (hover: hover) {
+  .dataRow:hover {
+    background: var(--color-bg-soft);
+    transform: translateX(1px);
+  }
+}
+
+/* Empty state */
+.emptyState {
+  margin-top: $space-6;
+  padding: $space-5 $space-4;
+  text-align: center;
+  border-radius: $radius-xl;
+  border: 1px dashed var(--color-border-primary);
+  background: var(--color-bg-card);
+}
+
+.emptyIcon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.emptyTitle {
+  margin-top: $space-2;
+  font-size: $font-size-md;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.emptySub {
+  margin-top: $space-1;
+  font-size: $font-size-xs;
+  color: var(--color-text-muted);
+}
+
+.empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  margin-top: $space-8;
+  font-size: $font-size-xs;
+}
