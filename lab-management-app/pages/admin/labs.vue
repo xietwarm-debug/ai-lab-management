@@ -4,14 +4,16 @@
       <view class="card heroCard">
         <view class="rowBetween heroTop">
           <view>
-            <view class="title">实验室管理</view>
-            <view class="subtitle">支持新增、编辑、删除实验室</view>
+            <view class="title">管理员实验室列表</view>
+            <view class="subtitle">管理员专属实验室总览、监测与维护</view>
           </view>
           <view class="heroActions">
             <button class="btnPrimary miniBtn" size="mini" @click="createLab">新增</button>
+            <button class="btnSecondary miniBtn" size="mini" @click="fetchSensorStatus(true)">刷新监测</button>
             <button class="btnSecondary miniBtn" size="mini" @click="fetchLabs">刷新</button>
           </view>
         </view>
+        <view class="heroMeta muted">仅管理员可访问，不与教师端、用户端实验室列表复用</view>
       </view>
 
       <view class="metricGrid">
@@ -73,8 +75,47 @@
           <view class="meta lineClamp" v-if="lab.description">说明：{{ lab.description }}</view>
           <view class="meta" v-else>说明：暂无</view>
 
+          <view class="sensorPanel">
+            <view class="rowBetween">
+              <view class="sensorTitle">环境与安全监测</view>
+              <view class="statusTag" :class="sensorLevelTone(sensorInfo(lab.id) && sensorInfo(lab.id).level)">
+                {{ sensorLevelText(sensorInfo(lab.id) && sensorInfo(lab.id).level) }}
+              </view>
+            </view>
+
+            <view class="sensorGrid" v-if="sensorInfo(lab.id)">
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'temperature')">
+                温度 {{ sensorInfo(lab.id).readings.temperatureC }}°C
+              </view>
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'humidity')">
+                湿度 {{ sensorInfo(lab.id).readings.humidityPct }}%
+              </view>
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'smoke')">
+                烟雾 {{ sensorInfo(lab.id).readings.smokePpm }}ppm
+              </view>
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'voltage')">
+                电压 {{ sensorInfo(lab.id).readings.voltageV }}V
+              </view>
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'current')">
+                电流 {{ sensorInfo(lab.id).readings.currentA }}A
+              </view>
+              <view class="sensorCell" :class="sensorModuleTone(sensorInfo(lab.id), 'people')">
+                人数 {{ sensorInfo(lab.id).readings.peopleCount }}人
+              </view>
+            </view>
+            <view class="muted" v-else>监测数据加载中...</view>
+
+            <view class="sensorAlert" v-if="sensorInfo(lab.id) && (sensorInfo(lab.id).alerts || []).length">
+              {{ (sensorInfo(lab.id).alerts || []).map((x) => x.message).join("；") }}
+            </view>
+            <view class="muted sensorTime" v-if="sensorInfo(lab.id)">
+              更新时间：{{ sensorInfo(lab.id).collectedAt || "-" }}
+            </view>
+          </view>
+
           <view class="actions">
             <button class="btnSecondary miniBtn" size="mini" @click="edit(lab)">编辑</button>
+            <button class="btnPrimary miniBtn" size="mini" @click="goRoomMap(lab)">机房状态编辑</button>
             <button
               class="btnDanger miniBtn"
               size="mini"
@@ -103,7 +144,7 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, getApiListData } from "@/common/api.js"
 
 const FALLBACK_BG = [
   "linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%)",
@@ -122,7 +163,18 @@ export default {
       page: 1,
       pageSize: 8,
       deletingId: 0,
-      badImageMap: {}
+      badImageMap: {},
+      sensorMap: {},
+      sensorTimer: null
+    }
+  },
+  onLoad(options) {
+    const rawKeyword = String((options && options.keyword) || "").trim()
+    if (!rawKeyword) return
+    try {
+      this.keyword = decodeURIComponent(rawKeyword)
+    } catch (e) {
+      this.keyword = rawKeyword
     }
   },
   computed: {
@@ -130,10 +182,14 @@ export default {
       const total = this.labs.length
       const free = this.labs.filter((x) => x.status === "free").length
       const busy = this.labs.filter((x) => x.status === "busy").length
+      const warningLabs = Object.values(this.sensorMap).filter((x) => x && x.level === "warning").length
+      const alarmLabs = Object.values(this.sensorMap).filter((x) => x && x.level === "alarm").length
       return [
         { key: "total", label: "实验室总数", value: total, hint: "系统全部实验室" },
         { key: "free", label: "空闲中", value: free, hint: "当前可预约" },
-        { key: "busy", label: "使用中", value: busy, hint: "当前占用" }
+        { key: "busy", label: "使用中", value: busy, hint: "当前占用" },
+        { key: "warning", label: "预警中", value: warningLabs, hint: "需要关注" },
+        { key: "alarm", label: "报警中", value: alarmLabs, hint: "需立即处理" }
       ]
     },
     filteredLabs() {
@@ -176,6 +232,13 @@ export default {
       return
     }
     this.fetchLabs()
+    this.startSensorTimer()
+  },
+  onHide() {
+    this.stopSensorTimer()
+  },
+  onUnload() {
+    this.stopSensorTimer()
   },
   methods: {
     statusText(status) {
@@ -217,17 +280,83 @@ export default {
     isDeleting(id) {
       return this.deletingId === id
     },
+    sensorInfo(labId) {
+      return this.sensorMap[String(labId)] || null
+    },
+    sensorLevelText(level) {
+      if (level === "alarm") return "报警"
+      if (level === "warning") return "预警"
+      return "正常"
+    },
+    sensorLevelTone(level) {
+      if (level === "alarm") return "danger"
+      if (level === "warning") return "warning"
+      return "success"
+    },
+    sensorModuleTone(sensor, moduleKey) {
+      const level = sensor && sensor.statusByModule ? sensor.statusByModule[moduleKey] : ""
+      if (level === "alarm") return "cellAlarm"
+      if (level === "warning") return "cellWarning"
+      return "cellNormal"
+    },
+    startSensorTimer() {
+      this.stopSensorTimer()
+      this.sensorTimer = setInterval(() => {
+        this.fetchSensorStatus(false)
+      }, 10000)
+    },
+    stopSensorTimer() {
+      if (this.sensorTimer) {
+        clearInterval(this.sensorTimer)
+        this.sensorTimer = null
+      }
+    },
+    fetchSensorStatus(force = false) {
+      if (!this.labs.length) {
+        this.sensorMap = {}
+        return
+      }
+      const forceFlag = force ? "?force=1" : ""
+      uni.request({
+        url: `${BASE_URL}/labs/sensor-status${forceFlag}`,
+        method: "GET",
+        success: (res) => {
+          const payload = (res && res.data) || {}
+          if (!payload.ok) {
+            if (force) {
+              uni.showToast({ title: payload.msg || "监测获取失败", icon: "none" })
+            }
+            return
+          }
+          const rows = Array.isArray(payload.data) ? payload.data : []
+          const next = {}
+          rows.forEach((row) => {
+            const key = String((row && row.labId) || "")
+            if (!key) return
+            next[key] = row
+          })
+          this.sensorMap = next
+        },
+        fail: () => {
+          if (force) {
+            uni.showToast({ title: "监测获取失败", icon: "none" })
+          }
+        }
+      })
+    },
     fetchLabs() {
       this.loading = true
       uni.request({
         url: `${BASE_URL}/labs`,
         method: "GET",
         success: (res) => {
-          this.labs = Array.isArray(res.data) ? res.data : []
+          this.labs = getApiListData(res.data)
           this.badImageMap = {}
+          this.fetchSensorStatus(true)
         },
         fail: () => {
           this.labs = []
+          this.sensorMap = {}
           uni.showToast({ title: "获取失败", icon: "none" })
         },
         complete: () => {
@@ -240,6 +369,10 @@ export default {
     },
     createLab() {
       uni.navigateTo({ url: "/pages/admin/lab-edit" })
+    },
+    goRoomMap(lab) {
+      if (!lab || !lab.id) return
+      uni.navigateTo({ url: `/pages/admin/room_map?labId=${lab.id}` })
     },
     removeLab(lab) {
       uni.showModal({
@@ -289,6 +422,10 @@ export default {
 
 .heroTop {
   align-items: flex-start;
+}
+
+.heroMeta {
+  margin-top: 8px;
 }
 
 .heroActions {
@@ -427,6 +564,63 @@ export default {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.sensorPanel {
+  margin-top: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  padding: 8px;
+  background: #f8fafc;
+}
+
+.sensorTitle {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.sensorGrid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sensorCell {
+  font-size: 11px;
+  border-radius: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+}
+
+.sensorCell.cellNormal {
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-color: #bfdbfe;
+}
+
+.sensorCell.cellWarning {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.sensorCell.cellAlarm {
+  background: #fff1f2;
+  color: #9f1239;
+  border-color: #fda4af;
+}
+
+.sensorAlert {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #b91c1c;
+  line-height: 1.5;
+}
+
+.sensorTime {
+  margin-top: 6px;
 }
 
 .actions {

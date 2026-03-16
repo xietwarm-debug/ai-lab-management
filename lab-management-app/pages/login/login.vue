@@ -4,7 +4,7 @@
       <view class="card heroCard">
         <view class="heroBadge">AIlab Secure</view>
         <view class="title">欢迎使用实验室管理系统</view>
-        <view class="subtitle">使用账号密码登录，支持学生与管理员角色</view>
+        <view class="subtitle">使用账号密码登录，支持学生、教师与管理员角色</view>
 
         <view class="heroMetaRow">
           <view class="heroMetaItem">安全认证：Token</view>
@@ -61,6 +61,19 @@
 
 <script>
 import { BASE_URL } from "@/common/api.js"
+import { redirectByRole } from "@/common/session.js"
+
+function resolveDeviceName() {
+  try {
+    const info = uni.getSystemInfoSync() || {}
+    const platform = String(info.platform || info.system || "").trim()
+    const model = String(info.model || info.deviceBrand || "").trim()
+    const text = `${platform} ${model}`.trim()
+    return text.slice(0, 80)
+  } catch (e) {
+    return ""
+  }
+}
 
 export default {
   data() {
@@ -129,6 +142,7 @@ export default {
     doLogin() {
       const name = this.username.trim()
       const pwd = this.password
+      const deviceName = resolveDeviceName()
       if (!this.validate()) return
       if (this.submitting) return
 
@@ -137,7 +151,7 @@ export default {
         url: `${BASE_URL}/login`,
         method: "POST",
         header: { "Content-Type": "application/json", "X-Skip-Auth": "1" },
-        data: { username: name, password: pwd },
+        data: { username: name, password: pwd, deviceName },
         success: (res) => {
           if (!res.data || !res.data.ok) {
             uni.showToast({ title: (res.data && res.data.msg) || "登录失败", icon: "none" })
@@ -159,6 +173,7 @@ export default {
     doRegister() {
       const name = this.username.trim()
       const pwd = this.password
+      const deviceName = resolveDeviceName()
       if (!this.validate()) return
       if (this.submitting) return
 
@@ -167,7 +182,7 @@ export default {
         url: `${BASE_URL}/register`,
         method: "POST",
         header: { "Content-Type": "application/json", "X-Skip-Auth": "1" },
-        data: { username: name, password: pwd },
+        data: { username: name, password: pwd, deviceName },
         success: (res) => {
           if (!res.data || !res.data.ok) {
             uni.showToast({ title: (res.data && res.data.msg) || "注册失败", icon: "none" })
@@ -188,7 +203,7 @@ export default {
       })
     },
     jumpByRole(role) {
-      uni.reLaunch({ url: "/pages/index/index" })
+      redirectByRole(role, { replace: true })
     }
   }
 }

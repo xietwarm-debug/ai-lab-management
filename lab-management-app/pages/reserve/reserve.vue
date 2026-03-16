@@ -120,7 +120,7 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, getApiListData } from "@/common/api.js"
 import { themePageMixin } from "@/common/theme.js"
 
 export default {
@@ -130,8 +130,8 @@ export default {
       labName: "未选择",
       labs: [],
       form: { user: "", date: "", time: [], reason: "" },
-      timeSlotsMorning: ["8:00-8:40", "8:45-9:35", "10:25-11:05", "11:10-11:50"],
-      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30", "7:00-7:40", "7:45-8:25"],
+      timeSlotsMorning: ["08:00-08:40", "08:45-09:35", "10:25-11:05", "11:10-11:50"],
+      timeSlotsAfternoon: ["14:30-15:10", "15:15-15:55", "16:05-16:45", "16:50-17:30", "19:00-19:40", "19:45-20:25"],
       showTimePicker: false,
       tempTimes: [],
       errors: {
@@ -146,7 +146,9 @@ export default {
         minDaysAhead: 0,
         maxDaysAhead: 30,
         minTime: "08:00",
-        maxTime: "22:00"
+        maxTime: "22:00",
+        slots: [],
+        disabledDates: []
       },
       aiLoading: false,
       aiRecommendations: []
@@ -180,7 +182,7 @@ export default {
         url: `${BASE_URL}/labs`,
         method: "GET",
         success: (res) => {
-          this.labs = Array.isArray(res.data) ? res.data : []
+          this.labs = getApiListData(res.data)
           if (this.labName === "未选择" && this.labs.length > 0) {
             this.labName = this.labs[0].name || "未选择"
           }
@@ -188,6 +190,7 @@ export default {
             const exists = this.labs.find((l) => l.name === this.labName)
             if (!exists) this.labName = "未选择"
           }
+          this.fetchReservationRules()
           this.fetchAiRecommendations()
         },
         fail: () => {
@@ -198,8 +201,13 @@ export default {
       })
     },
     fetchReservationRules() {
+      const selectedLab = this.getSelectedLab()
+      const q = []
+      if (selectedLab && selectedLab.id) q.push(`labId=${encodeURIComponent(String(selectedLab.id))}`)
+      else if (this.labName && this.labName !== "未选择") q.push(`labName=${encodeURIComponent(this.labName)}`)
+      const query = q.length ? `?${q.join("&")}` : ""
       uni.request({
-        url: `${BASE_URL}/reservation-rules`,
+        url: `${BASE_URL}/reservation-rules${query}`,
         method: "GET",
         success: (res) => {
           const payload = res.data || {}
@@ -211,6 +219,10 @@ export default {
           this.rules.maxDaysAhead = Number(data.maxDaysAhead || 30)
           this.rules.minTime = data.minTime || "08:00"
           this.rules.maxTime = data.maxTime || "22:00"
+          this.rules.slots = Array.isArray(data.slots) ? data.slots : []
+          this.rules.disabledDates = Array.isArray(data.disabledDates) ? data.disabledDates : []
+          this.applyRuleSlots(this.rules.slots)
+          this.form.time = this.form.time.filter((x) => this.rules.slots.includes(x))
         }
       })
     },
@@ -219,6 +231,7 @@ export default {
       const lab = this.labs[idx]
       this.labName = lab ? lab.name : "未选择"
       this.errors.labName = ""
+      this.fetchReservationRules()
       this.fetchAiRecommendations()
     },
     onDateChange(e) {
@@ -246,6 +259,20 @@ export default {
     getSelectedLab() {
       if (!Array.isArray(this.labs) || this.labs.length === 0) return null
       return this.labs.find((l) => l && l.name === this.labName) || null
+    },
+    applyRuleSlots(slotList) {
+      const list = Array.isArray(slotList) ? slotList : []
+      if (list.length === 0) return
+      const morning = []
+      const afternoon = []
+      list.forEach((slot) => {
+        const text = String(slot || "").trim()
+        const hour = Number((text.split("-")[0] || "0").split(":")[0] || 0)
+        if (Number.isFinite(hour) && hour < 12) morning.push(text)
+        else afternoon.push(text)
+      })
+      this.timeSlotsMorning = morning
+      this.timeSlotsAfternoon = afternoon
     },
     fetchAiRecommendations() {
       const user = this.syncCurrentUser()
@@ -320,6 +347,9 @@ export default {
       } else if (this.rules.maxDate && this.form.date > this.rules.maxDate) {
         this.errors.date = "日期晚于可预约范围"
         ok = false
+      } else if (Array.isArray(this.rules.disabledDates) && this.rules.disabledDates.includes(this.form.date)) {
+        this.errors.date = "该日期为停用日，无法预约"
+        ok = false
       }
 
       if (this.form.time.length === 0) {
@@ -371,9 +401,15 @@ export default {
               }
 
               const orderId = res.data.data && res.data.data.id ? res.data.data.id : "-"
+              const status = String((res.data.data && res.data.data.status) || "pending").trim()
+              const statusText = status === "approved" ? "已通过" : status === "pending" ? "待审批" : status
+              const content =
+                status === "approved"
+                  ? `预约已提交并自动通过\n编号：${orderId}`
+                  : `已提交预约申请，等待审批\n编号：${orderId}`
               uni.showModal({
                 title: "提交成功",
-                content: `已提交预约申请，等待审批\n编号：${orderId}`,
+                content: `${content}\n状态：${statusText}`,
                 showCancel: false,
                 success: () => {
                   uni.navigateBack()

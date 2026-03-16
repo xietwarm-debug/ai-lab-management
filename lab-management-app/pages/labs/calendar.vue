@@ -86,12 +86,13 @@ export default {
       labName: "",
       date: "",
       loading: false,
-      timeSlotsMorning: ["8:00-8:40", "8:45-9:35", "10:25-11:05", "11:10-11:50"],
-      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30", "7:00-7:40", "7:45-8:25"],
+      timeSlotsMorning: ["08:00-08:40", "08:45-09:35", "10:25-11:05", "11:10-11:50"],
+      timeSlotsAfternoon: ["14:30-15:10", "15:15-15:55", "16:05-16:45", "16:50-17:30", "19:00-19:40", "19:45-20:25"],
       bookedSet: new Set(),
       rules: {
         minDate: "",
-        maxDate: ""
+        maxDate: "",
+        slots: []
       }
     }
   },
@@ -103,8 +104,9 @@ export default {
   },
   methods: {
     fetchReservationRules() {
+      const q = this.labName ? `?labName=${encodeURIComponent(this.labName)}` : ""
       uni.request({
-        url: `${BASE_URL}/reservation-rules`,
+        url: `${BASE_URL}/reservation-rules${q}`,
         method: "GET",
         success: (res) => {
           const payload = res.data || {}
@@ -116,6 +118,8 @@ export default {
 
           this.rules.minDate = payload.data.minDate || ""
           this.rules.maxDate = payload.data.maxDate || ""
+          this.rules.slots = Array.isArray(payload.data.slots) ? payload.data.slots : []
+          this.applyRuleSlots(this.rules.slots)
           this.date = this.date || this.rules.minDate || todayText()
           if (this.labName && this.date) this.fetchReservations()
         },
@@ -166,6 +170,20 @@ export default {
           this.loading = false
         }
       })
+    },
+    applyRuleSlots(slotList) {
+      const list = Array.isArray(slotList) ? slotList : []
+      if (list.length === 0) return
+      const morning = []
+      const afternoon = []
+      list.forEach((slot) => {
+        const text = String(slot || "").trim()
+        const hour = Number((text.split("-")[0] || "0").split(":")[0] || 0)
+        if (Number.isFinite(hour) && hour < 12) morning.push(text)
+        else afternoon.push(text)
+      })
+      this.timeSlotsMorning = morning
+      this.timeSlotsAfternoon = afternoon
     },
     goReserve() {
       if (!this.labName) {

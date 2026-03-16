@@ -35,7 +35,13 @@
       </view>
 
       <view class="stack" v-else-if="shownList.length > 0">
-        <view v-for="item in shownList" :key="item.id" class="card lostItem">
+        <view
+          v-for="item in shownList"
+          :key="item.id"
+          class="card lostItem"
+          :id="`lost-item-${item.id}`"
+          :class="{ focusItem: isFocused(item) }"
+        >
           <view class="rowBetween">
             <view class="itemName">{{ item.title || '-' }}</view>
             <view class="typeTag" :class="item.type">{{ item.type === 'lost' ? '失物' : '拾到' }}</view>
@@ -121,10 +127,27 @@
 import { BASE_URL } from "@/common/api.js"
 import { themePageMixin } from "@/common/theme.js"
 
+function toInt(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n) : 0
+}
+
+function normalizeTypeFilter(rawType) {
+  const type = String(rawType || "").trim().toLowerCase()
+  return type === "lost" || type === "found" ? type : "all"
+}
+
+function inferTypeFromNoticeStatus(rawStatus) {
+  const status = String(rawStatus || "").trim().toLowerCase()
+  if (status.startsWith("claim_")) return "found"
+  return "all"
+}
+
 export default {
   mixins: [themePageMixin],
   data() {
     return {
+      focusItemId: 0,
       list: [],
       user: "",
       role: "",
@@ -150,6 +173,13 @@ export default {
       ]
     }
   },
+  onLoad(options) {
+    const opts = options || {}
+    const directType = normalizeTypeFilter(opts.type)
+    const inferType = inferTypeFromNoticeStatus(opts.noticeStatus)
+    this.typeFilter = directType !== "all" ? directType : inferType
+    this.focusItemId = toInt(opts.focusId)
+  },
   computed: {
     shownList() {
       if (this.typeFilter === "all") return this.list
@@ -169,6 +199,9 @@ export default {
     this.fetchList()
   },
   methods: {
+    isFocused(item) {
+      return Number((item && item.id) || 0) === this.focusItemId
+    },
     setType(type) {
       this.typeFilter = type
     },
@@ -179,6 +212,7 @@ export default {
         method: "GET",
         success: (res) => {
           this.list = Array.isArray(res.data) ? res.data : []
+          this.scrollToFocusedItem()
         },
         fail: () => {
           this.list = []
@@ -187,6 +221,15 @@ export default {
         complete: () => {
           this.loading = false
         }
+      })
+    },
+    scrollToFocusedItem() {
+      if (!this.focusItemId) return
+      this.$nextTick(() => {
+        uni.pageScrollTo({
+          selector: `#lost-item-${this.focusItemId}`,
+          duration: 220
+        })
       })
     },
     imgSrc(url) {
@@ -388,6 +431,11 @@ export default {
 
 .lostItem {
   border: 1px solid var(--color-border-primary);
+}
+
+.lostItem.focusItem {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.14);
 }
 
 .itemName {

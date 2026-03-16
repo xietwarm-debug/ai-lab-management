@@ -94,7 +94,7 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, getApiListData } from "@/common/api.js"
 import { themePageMixin } from "@/common/theme.js"
 
 const FALLBACK_BG = [
@@ -180,7 +180,7 @@ export default {
         url: `${BASE_URL}/labs${qs}`,
         method: "GET",
         success: (res) => {
-          this.labs = Array.isArray(res.data) ? res.data : []
+          this.labs = getApiListData(res.data)
         },
         fail: () => {
           this.labs = []

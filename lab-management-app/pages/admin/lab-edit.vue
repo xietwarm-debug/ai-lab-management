@@ -128,7 +128,7 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, getApiListData } from "@/common/api.js"
 
 export default {
   data() {
@@ -208,7 +208,7 @@ export default {
         url: `${BASE_URL}/labs`,
         method: "GET",
         success: (res) => {
-          const row = (res.data || []).find((x) => String(x.id) === String(this.id))
+          const row = getApiListData(res.data).find((x) => String(x.id) === String(this.id))
           if (!row) {
             uni.showToast({ title: "实验室不存在", icon: "none" })
             setTimeout(() => this.goBack(), 250)

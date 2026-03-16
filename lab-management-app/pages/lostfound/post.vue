@@ -59,10 +59,25 @@
         <view class="label">图片</view>
         <view class="rowBetween uploadRow">
           <button class="btnGhost miniBtn" size="mini" @click="chooseImage">选择图片</button>
+          <button class="btnSecondary miniBtn" size="mini" :loading="matching" @click="findSimilarItems">AI查找相似</button>
           <button v-if="form.imageUrl" class="btnSecondary miniBtn" size="mini" @click="removeImage">移除</button>
           <view class="muted" v-else>未上传</view>
         </view>
         <image v-if="form.imageUrl" :src="imgSrc(form.imageUrl)" class="preview" mode="aspectFill" />
+      </view>
+
+      <view class="card summaryCard" v-if="matchSummary || matchCandidates.length > 0">
+        <view class="cardTitle">AI 相似匹配</view>
+        <view class="summaryLine">{{ matchSummary || "已生成候选结果" }}</view>
+        <view class="matchCard" v-for="item in matchCandidates" :key="'match-' + item.id">
+          <view class="rowBetween">
+            <view class="matchTitle">{{ item.title || "-" }}</view>
+            <view class="matchScore">相似度 {{ Math.round(Number(item.matchScore || 0)) }}%</view>
+          </view>
+          <view class="summaryLine">地点：{{ item.location || "-" }} · 联系方式：{{ item.contact || "-" }}</view>
+          <view class="summaryLine" v-if="item.reasons && item.reasons.length > 0">{{ item.reasons.join("；") }}</view>
+          <button class="btnGhost miniBtn" size="mini" @click="goMatchDetail(item)">查看候选</button>
+        </view>
       </view>
 
       <view class="card summaryCard">
@@ -96,7 +111,10 @@ export default {
         location: "",
         contact: "",
         description: ""
-      }
+      },
+      matching: false,
+      matchSummary: "",
+      matchCandidates: []
     }
   },
   onLoad(options) {
@@ -119,6 +137,8 @@ export default {
       this.form.contact = ""
       this.form.description = ""
       this.form.imageUrl = ""
+      this.matchSummary = ""
+      this.matchCandidates = []
       this.errors.title = ""
       this.errors.location = ""
       this.errors.contact = ""
@@ -218,6 +238,59 @@ export default {
       if (String(url).startsWith("http")) return url
       return `${BASE_URL}${url}`
     },
+    goMatchDetail(item) {
+      if (!item || !item.id) return
+      const type = item.type === "found" || item.type === "lost" ? item.type : "all"
+      uni.navigateTo({ url: `/pages/lostfound/list?type=${encodeURIComponent(type)}&focusId=${encodeURIComponent(String(item.id))}` })
+    },
+    findSimilarItems() {
+      const s = uni.getStorageSync("session")
+      if (!s || !s.username) {
+        uni.showToast({ title: "请先登录", icon: "none" })
+        uni.reLaunch({ url: "/pages/login/login" })
+        return
+      }
+      if (this.matching) return
+      const title = String(this.form.title || "").trim()
+      const description = String(this.form.description || "").trim()
+      if (!title && !description && !this.form.imageUrl) {
+        uni.showToast({ title: "请先填写标题、描述或上传图片", icon: "none" })
+        return
+      }
+      this.matching = true
+      uni.request({
+        url: `${BASE_URL}/lostfound/ai-match`,
+        method: "POST",
+        header: { "Content-Type": "application/json" },
+        data: {
+          type: this.form.type,
+          title,
+          description,
+          location: String(this.form.location || "").trim(),
+          imageUrl: String(this.form.imageUrl || "").trim()
+        },
+        success: (res) => {
+          const payload = (res && res.data) || {}
+          if (!payload.ok || !payload.data) {
+            this.matchSummary = payload.msg || "匹配失败"
+            this.matchCandidates = []
+            return
+          }
+          this.matchSummary = String(payload.data.summary || "").trim()
+          this.matchCandidates = Array.isArray(payload.data.candidates) ? payload.data.candidates : []
+          if (this.matchCandidates.length === 0) {
+            uni.showToast({ title: "暂无高相似候选", icon: "none" })
+          }
+        },
+        fail: () => {
+          this.matchSummary = "匹配失败，请稍后重试。"
+          this.matchCandidates = []
+        },
+        complete: () => {
+          this.matching = false
+        }
+      })
+    },
     removeImage() {
       this.form.imageUrl = ""
     },
@@ -312,6 +385,25 @@ export default {
   margin-top: 8px;
   font-size: 12px;
   color: #475569;
+}
+
+.matchCard {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: #f8fafc;
+}
+
+.matchTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.matchScore {
+  font-size: 12px;
+  color: #1d4ed8;
 }
 
 .submitBtn {

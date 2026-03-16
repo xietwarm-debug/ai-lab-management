@@ -133,6 +133,8 @@ export default {
       ],
       actionOptions: [
         { label: "全部动作", value: "" },
+        { label: "用户改角色", value: "admin.user.set_role" },
+        { label: "用户删除", value: "admin.user.delete" },
         { label: "用户升权", value: "admin.user.promote" },
         { label: "用户降权", value: "admin.user.demote" },
         { label: "实验室更新", value: "admin.lab.update" },
@@ -188,6 +190,8 @@ export default {
   methods: {
     actionText(action) {
       const map = {
+        "admin.user.set_role": "用户改角色",
+        "admin.user.delete": "用户删除",
         "admin.user.promote": "用户升权",
         "admin.user.demote": "用户降权",
         "admin.lab.update": "实验室更新",

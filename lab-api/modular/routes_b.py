@@ -1,4 +1,5 @@
 from . import core as _core
+import random
 
 for _k, _v in _core.__dict__.items():
     if _k.startswith("__"):
@@ -6,6 +7,214 @@ for _k, _v in _core.__dict__.items():
     globals()[_k] = _v
 
 del _k, _v, _core
+
+_LAB_SENSOR_LOCK = Lock()
+_LAB_SENSOR_CACHE = {}
+_SENSOR_CACHE_TTL_SECONDS = 8
+_SENSOR_ALARM_COOLDOWN_SECONDS = 120
+
+
+def _module_level(value, warning_low=None, warning_high=None, alarm_low=None, alarm_high=None):
+    level = "normal"
+    if alarm_low is not None and value < alarm_low:
+        return "alarm"
+    if alarm_high is not None and value > alarm_high:
+        return "alarm"
+    if warning_low is not None and value < warning_low:
+        return "warning"
+    if warning_high is not None and value > warning_high:
+        return "warning"
+    return level
+
+
+def _level_rank(level):
+    if level == "alarm":
+        return 2
+    if level == "warning":
+        return 1
+    return 0
+
+
+def _overall_level(levels):
+    max_level = "normal"
+    for lv in levels:
+        if _level_rank(lv) > _level_rank(max_level):
+            max_level = lv
+    return max_level
+
+
+def _simulate_sensor_readings(capacity):
+    safe_capacity = max(1, int(capacity or 1))
+    temperature = round(random.uniform(21.0, 31.5), 1)
+    humidity = round(random.uniform(38.0, 68.0), 1)
+    smoke_ppm = round(random.uniform(2.0, 45.0), 1)
+    voltage = round(random.uniform(214.0, 232.0), 1)
+    current_amp = round(random.uniform(1.0, 10.5), 2)
+    people_count = random.randint(0, safe_capacity)
+
+    # Inject occasional anomalies for warning/alarm simulation.
+    if random.random() < 0.16:
+        temperature = round(random.uniform(35.0, 44.5), 1)
+    if random.random() < 0.09:
+        smoke_ppm = round(random.uniform(90.0, 220.0), 1)
+    if random.random() < 0.1:
+        voltage = round(random.uniform(176.0, 198.0), 1) if random.random() < 0.5 else round(random.uniform(246.0, 268.0), 1)
+    if random.random() < 0.08:
+        current_amp = round(random.uniform(18.0, 34.0), 2)
+    if random.random() < 0.12:
+        people_count = random.randint(safe_capacity + 1, safe_capacity + 18)
+
+    return {
+        "temperatureC": temperature,
+        "humidityPct": humidity,
+        "smokePpm": smoke_ppm,
+        "voltageV": voltage,
+        "currentA": current_amp,
+        "peopleCount": int(people_count),
+    }
+
+
+def _build_sensor_payload(lab_row):
+    lab_id = int(lab_row.get("id") or 0)
+    lab_name = str(lab_row.get("name") or "").strip() or f"LAB-{lab_id}"
+    capacity = max(0, int(_to_int_or_none(lab_row.get("capacity")) or 0))
+    readings = _simulate_sensor_readings(capacity if capacity > 0 else 40)
+
+    module_levels = {
+        "temperature": _module_level(readings["temperatureC"], warning_high=35.0, alarm_high=39.0),
+        "humidity": _module_level(readings["humidityPct"], warning_low=30.0, warning_high=75.0, alarm_low=20.0, alarm_high=85.0),
+        "smoke": _module_level(readings["smokePpm"], warning_high=80.0, alarm_high=120.0),
+        "voltage": _module_level(readings["voltageV"], warning_low=205.0, warning_high=245.0, alarm_low=195.0, alarm_high=255.0),
+        "current": _module_level(readings["currentA"], warning_high=16.0, alarm_high=24.0),
+        "people": _module_level(
+            float(readings["peopleCount"]),
+            warning_high=float(max(capacity, 1)),
+            alarm_high=float(max(int(capacity * 1.3), capacity + 1)),
+        ),
+    }
+
+    alerts = []
+    if module_levels["temperature"] != "normal":
+        alerts.append(
+            {
+                "code": "temp_high",
+                "level": module_levels["temperature"],
+                "message": f"实验室温度偏高（{readings['temperatureC']}°C）",
+                "metric": {"temperatureC": readings["temperatureC"]},
+            }
+        )
+    if module_levels["smoke"] != "normal":
+        alerts.append(
+            {
+                "code": "smoke_detected",
+                "level": module_levels["smoke"],
+                "message": f"检测到烟雾浓度异常（{readings['smokePpm']} ppm）",
+                "metric": {"smokePpm": readings["smokePpm"]},
+            }
+        )
+    if module_levels["voltage"] != "normal":
+        alerts.append(
+            {
+                "code": "voltage_fault",
+                "level": module_levels["voltage"],
+                "message": f"电压异常（{readings['voltageV']} V）",
+                "metric": {"voltageV": readings["voltageV"]},
+            }
+        )
+    if module_levels["current"] != "normal":
+        alerts.append(
+            {
+                "code": "current_overload",
+                "level": module_levels["current"],
+                "message": f"电流异常（{readings['currentA']} A）",
+                "metric": {"currentA": readings["currentA"]},
+            }
+        )
+    if module_levels["people"] != "normal":
+        alerts.append(
+            {
+                "code": "people_overcrowded",
+                "level": module_levels["people"],
+                "message": f"人数偏高（{readings['peopleCount']} 人）",
+                "metric": {"peopleCount": readings["peopleCount"], "capacity": capacity},
+            }
+        )
+
+    return {
+        "labId": lab_id,
+        "labName": lab_name,
+        "capacity": capacity,
+        "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "readings": readings,
+        "statusByModule": module_levels,
+        "level": _overall_level(module_levels.values()),
+        "alerts": alerts,
+    }
+
+
+def _alarm_for_notify(alert):
+    if not alert or str(alert.get("level") or "") != "alarm":
+        return False
+    return str(alert.get("code") or "") in {"temp_high", "smoke_detected", "voltage_fault"}
+
+
+def _save_sensor_alarm_if_needed(lab_id, lab_name, alert):
+    alarm_code = str(alert.get("code") or "").strip()
+    if not alarm_code:
+        return False
+
+    latest = query(
+        """
+        SELECT id, created_at AS createdAt
+        FROM lab_sensor_alarm
+        WHERE lab_id=%s AND alarm_code=%s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (lab_id, alarm_code),
+    )
+    if latest:
+        latest_at = _to_datetime((latest[0] or {}).get("createdAt"))
+        if latest_at and (datetime.now() - latest_at).total_seconds() < _SENSOR_ALARM_COOLDOWN_SECONDS:
+            return False
+
+    message = str(alert.get("message") or "").strip()[:255]
+    level = str(alert.get("level") or "alarm").strip() or "alarm"
+    metric_json = json.dumps(alert.get("metric") or {}, ensure_ascii=False)
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    new_id = execute_insert(
+        """
+        INSERT INTO lab_sensor_alarm (lab_id, lab_name, alarm_code, level, message, metric_json, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (lab_id, lab_name, alarm_code, level, message, metric_json, created_at),
+    )
+    audit_log(
+        "admin.lab.sensor_alarm",
+        target_type="lab",
+        target_id=lab_id,
+        detail={"alarmId": int(new_id or 0), "code": alarm_code, "level": level, "message": message},
+    )
+    return True
+
+
+def _resolve_sensor_payload(lab_row, force=False):
+    lab_id = int(lab_row.get("id") or 0)
+    now = datetime.now()
+    with _LAB_SENSOR_LOCK:
+        cached = _LAB_SENSOR_CACHE.get(lab_id)
+        if (
+            not force
+            and cached
+            and (now - cached.get("updatedAt", now)).total_seconds() < _SENSOR_CACHE_TTL_SECONDS
+            and cached.get("payload")
+        ):
+            payload = cached["payload"]
+        else:
+            payload = _build_sensor_payload(lab_row)
+            _LAB_SENSOR_CACHE[lab_id] = {"updatedAt": now, "payload": payload}
+    return payload
 
 @app.get("/lostfound")
 @auth_required()
@@ -101,6 +310,155 @@ def create_lost_found():
         (title, item_type, description, location, contact, owner, created_at, image_url),
     )
     return jsonify({"ok": True, "data": {"id": new_id}})
+
+
+def _lostfound_ai_tokens(*parts):
+    merged = " ".join([str(x or "").strip().lower() for x in parts if str(x or "").strip()])
+    merged = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", merged)
+    tokens = []
+    for part in merged.split():
+        if not part:
+            continue
+        if re.search(r"[\u4e00-\u9fff]", part):
+            if len(part) <= 4:
+                tokens.append(part)
+            for idx in range(max(0, len(part) - 1)):
+                tokens.append(part[idx : idx + 2])
+        else:
+            if len(part) >= 2:
+                tokens.append(part)
+    dedup = []
+    seen = set()
+    for token in tokens:
+        text = str(token or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        dedup.append(text)
+        if len(dedup) >= 30:
+            break
+    return dedup
+
+
+def _lostfound_ai_match_reason(source_row, candidate_row):
+    source_tokens = set(_lostfound_ai_tokens(source_row.get("title"), source_row.get("description")))
+    candidate_tokens = set(_lostfound_ai_tokens(candidate_row.get("title"), candidate_row.get("description")))
+    overlap = sorted(list(source_tokens & candidate_tokens), key=lambda x: (-len(x), x))
+    union_size = max(1, len(source_tokens | candidate_tokens))
+    score = round(len(overlap) / float(union_size) * 100, 1)
+
+    reasons = []
+    source_location = str(source_row.get("location") or "").strip()
+    candidate_location = str(candidate_row.get("location") or "").strip()
+    if source_location and candidate_location:
+        if source_location == candidate_location or source_location in candidate_location or candidate_location in source_location:
+            score += 12
+            reasons.append("地点信息相近")
+    if overlap:
+        reasons.append("共同关键词：" + "、".join(overlap[:3]))
+    if source_row.get("imageUrl") and candidate_row.get("imageUrl"):
+        score += 6
+        reasons.append("双方都提供了图片线索")
+
+    if str(source_row.get("title") or "").strip() and str(candidate_row.get("title") or "").strip():
+        if str(source_row.get("title")).strip() in str(candidate_row.get("title")).strip() or str(candidate_row.get("title")).strip() in str(source_row.get("title")).strip():
+            score += 10
+            reasons.append("标题描述高度接近")
+
+    score = max(0.0, min(99.0, score))
+    return score, reasons[:3]
+
+
+@app.post("/lostfound/ai-match")
+@auth_required()
+def lostfound_ai_match():
+    payload = request.get_json(force=True) or {}
+    item_id = _to_int_or_none(payload.get("itemId"))
+    source_row = None
+
+    if item_id:
+        rows = query(
+            """
+            SELECT id, title, item_type AS type, description, location, image_url AS imageUrl, status
+            FROM lost_found
+            WHERE id=%s
+            LIMIT 1
+            """,
+            (int(item_id),),
+        )
+        source_row = (rows or [None])[0]
+        if not source_row:
+            raise BizError("lostfound item not found", 404)
+    else:
+        source_type = str(payload.get("type") or "").strip().lower()
+        if source_type not in {"lost", "found"}:
+            raise BizError("type required", 400)
+        source_row = {
+            "id": 0,
+            "title": str(payload.get("title") or "").strip(),
+            "type": source_type,
+            "description": str(payload.get("description") or "").strip(),
+            "location": str(payload.get("location") or "").strip(),
+            "imageUrl": str(payload.get("imageUrl") or "").strip(),
+            "status": "open",
+        }
+
+    if not str(source_row.get("title") or "").strip() and not str(source_row.get("description") or "").strip() and not str(source_row.get("imageUrl") or "").strip():
+        raise BizError("title or description or image required", 400)
+
+    source_type = str(source_row.get("type") or "").strip().lower()
+    target_type = "found" if source_type == "lost" else "lost"
+    rows = query(
+        """
+        SELECT id, title, item_type AS type, description, location, contact, status, owner, created_at AS createdAt, image_url AS imageUrl
+        FROM lost_found
+        WHERE item_type=%s AND status='open'
+        ORDER BY id DESC
+        LIMIT 80
+        """,
+        (target_type,),
+    )
+
+    candidates = []
+    for row in rows or []:
+        if item_id and int(row.get("id") or 0) == int(item_id):
+            continue
+        score, reasons = _lostfound_ai_match_reason(source_row, row)
+        if score < 18 and not reasons:
+            continue
+        candidates.append(
+            {
+                "id": int(row.get("id") or 0),
+                "title": str(row.get("title") or "").strip(),
+                "type": str(row.get("type") or "").strip(),
+                "description": str(row.get("description") or "").strip(),
+                "location": str(row.get("location") or "").strip(),
+                "contact": str(row.get("contact") or "").strip(),
+                "owner": str(row.get("owner") or "").strip(),
+                "createdAt": _to_text_time(row.get("createdAt")),
+                "imageUrl": str(row.get("imageUrl") or "").strip(),
+                "matchScore": score,
+                "reasons": reasons,
+            }
+        )
+
+    candidates.sort(key=lambda item: (-float(item.get("matchScore") or 0), -int(item.get("id") or 0)))
+    summary = (
+        f"已为{ '失物' if source_type == 'lost' else '拾到物品' }匹配 {len(candidates[:8])} 条候选记录。"
+        if candidates
+        else "未找到高相似候选，建议补充更明确的颜色、品牌、时间地点或上传图片后再试。"
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "sourceType": source_type,
+                "targetType": target_type,
+                "summary": summary,
+                "candidates": candidates[:8],
+            },
+        }
+    )
 
 
 @app.post("/lostfound/<int:lid>/delete")
@@ -411,7 +769,7 @@ def get_labs():
             ORDER BY id DESC
             """
         )
-        return jsonify(rows)
+        return jsonify({"ok": True, "data": rows, "meta": {"keyword": "", "count": len(rows)}})
 
     rows = query(
         """
@@ -424,7 +782,40 @@ def get_labs():
         """,
         (f"%{keyword}%",),
     )
-    return jsonify(rows)
+    return jsonify({"ok": True, "data": rows, "meta": {"keyword": keyword, "count": len(rows)}})
+
+
+@app.get("/labs/sensor-status")
+@auth_required(roles=["admin"])
+def get_lab_sensor_status():
+    lab_id_raw = request.args.get("labId", "").strip()
+    force_raw = request.args.get("force", "").strip().lower()
+    force_refresh = force_raw in ("1", "true", "yes", "on")
+    lab_id = _to_int_or_none(lab_id_raw)
+    if lab_id_raw and lab_id is None:
+        return jsonify({"ok": False, "msg": "invalid labId"}), 400
+
+    if lab_id:
+        labs = query("SELECT id, name, capacity FROM lab WHERE id=%s LIMIT 1", (lab_id,))
+        if not labs:
+            return jsonify({"ok": False, "msg": "lab not found"}), 404
+    else:
+        labs = query("SELECT id, name, capacity FROM lab ORDER BY id ASC")
+
+    rows = []
+    inserted_count = 0
+    for lab in labs:
+        payload = _resolve_sensor_payload(lab, force=force_refresh)
+        rows.append(payload)
+        for alert in payload.get("alerts") or []:
+            if not _alarm_for_notify(alert):
+                continue
+            if _save_sensor_alarm_if_needed(payload["labId"], payload["labName"], alert):
+                inserted_count += 1
+
+    if lab_id:
+        return jsonify({"ok": True, "data": rows[0], "meta": {"insertedAlarms": inserted_count}})
+    return jsonify({"ok": True, "data": rows, "meta": {"insertedAlarms": inserted_count}})
 
 
 @app.post("/labs/<int:lid>")
@@ -571,10 +962,6 @@ def create_reservation_internal(user_name, date, time_range, reason="", lab_id=N
     if not date_text or not time_text:
         raise BizError("params error", 400)
 
-    schedule_error = validate_reservation_schedule(date_text, time_text)
-    if schedule_error:
-        raise BizError(schedule_error, 400)
-
     if lab_id_val:
         lab_rows = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lab_id_val,))
     elif lab_name_val:
@@ -590,6 +977,25 @@ def create_reservation_internal(user_name, date, time_range, reason="", lab_id=N
     if not resolved_lab_name:
         raise BizError("lab not found", 404)
 
+    schedule_error = validate_reservation_schedule(
+        date_text,
+        time_text,
+        lab_id=resolved_lab_id,
+        lab_name=resolved_lab_name,
+    )
+    if schedule_error:
+        raise BizError(schedule_error, 400)
+
+    review_decision = resolve_reservation_review_policy(
+        lab_id=resolved_lab_id,
+        lab_name=resolved_lab_name,
+        date_text=date_text,
+        time_range=time_text,
+    )
+    init_status = str(review_decision.get("status") or "pending").strip() or "pending"
+    review_role = str(review_decision.get("reviewRole") or "").strip().lower()
+    review_policy = str(review_decision.get("reviewPolicy") or "").strip().lower()
+
     created_at = datetime.now().isoformat(timespec="seconds")
 
     def _tx(cur):
@@ -601,16 +1007,63 @@ def create_reservation_internal(user_name, date, time_range, reason="", lab_id=N
                 raise BizError("reservation conflict with approved", 409)
             cur.execute(
                 """
-                INSERT INTO reservation (lab_id, lab_name, user_name, date, time, reason, status, reject_reason, created_at)
-                VALUES (%s,%s,%s,%s,%s,%s,'pending','',%s)
+                INSERT INTO reservation (
+                    lab_id, lab_name, user_name, date, time, reason, status, reject_reason, created_at, review_role, review_policy
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,'',%s,%s,%s)
                 """,
-                (resolved_lab_id, resolved_lab_name, user, date_text, time_text, reason_text, created_at),
+                (
+                    resolved_lab_id,
+                    resolved_lab_name,
+                    user,
+                    date_text,
+                    time_text,
+                    reason_text,
+                    init_status,
+                    created_at,
+                    review_role,
+                    review_policy,
+                ),
             )
             return cur.lastrowid
         finally:
             _release_named_lock(cur, lock_key)
 
-    new_id = run_in_transaction(_tx)
+    try:
+        new_id = run_in_transaction(_tx)
+    except BizError as e:
+        msg_text = str(e.msg or "").strip().lower()
+        if int(e.status or 0) == 409 and "conflict" in msg_text:
+            plans = []
+            try:
+                plans = build_reservation_plans(
+                    user_name=user,
+                    lab_id_or_name=resolved_lab_id,
+                    preferred_date=date_text,
+                    preferred_time=time_text,
+                    days=7,
+                    k=3,
+                )
+            except Exception:
+                plans = []
+            if plans:
+                reply = _agent_build_plan_options_text(plans, prefix="该时段冲突，我给你3个可选方案：")
+                err = BizError("conflict", 409)
+                err.data = {"reply": reply, "plans": plans}
+                audit_log(
+                    "reservation.plan.generated",
+                    target_type="reservation_plan",
+                    detail={
+                        "labId": resolved_lab_id,
+                        "labName": resolved_lab_name,
+                        "preferredDate": date_text,
+                        "preferredTime": time_text,
+                        "planCount": len(plans),
+                    },
+                    actor={"username": user},
+                )
+                raise err
+        raise
     return {
         "id": int(new_id),
         "labId": resolved_lab_id,
@@ -618,7 +1071,10 @@ def create_reservation_internal(user_name, date, time_range, reason="", lab_id=N
         "date": date_text,
         "time": time_text,
         "reason": reason_text,
-        "status": "pending",
+        "status": init_status,
+        "reviewRole": review_role,
+        "reviewPolicy": review_policy,
+        "approvalRequired": bool(review_decision.get("approvalRequired")),
     }
 
 

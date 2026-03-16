@@ -13,18 +13,42 @@
     </view>
 
     <view class="menuList">
-      <view class="menuItem" @click="goReservations">
+      <view class="menuItem" v-if="!isAdmin" @click="goReservations">
         <view class="leftWrap">
-          <view class="itemIcon">预</view>
+          <image class="itemIconImage" src="/static/my/我的预约.png" mode="aspectFit" />
           <view class="itemText">我的预约</view>
+        </view>
+        <view class="arrow">&gt;</view>
+      </view>
+
+      <view class="menuItem" v-if="!isAdmin" @click="goBorrowings">
+        <view class="leftWrap">
+          <image class="itemIconImage" src="/static/my/我的借用.png" mode="aspectFit" />
+          <view class="itemText">我的借用</view>
+        </view>
+        <view class="arrow">&gt;</view>
+      </view>
+
+      <view class="menuItem" @click="goRepairOrders">
+        <view class="leftWrap">
+          <image class="itemIconImage" src="/static/my/我的工单.png" mode="aspectFit" />
+          <view class="itemText">我的工单</view>
         </view>
         <view class="arrow">&gt;</view>
       </view>
 
       <view class="menuItem" @click="goSettings">
         <view class="leftWrap">
-          <view class="itemIcon">设</view>
+          <image class="itemIconImage" src="/static/my/设置.png" mode="aspectFit" />
           <view class="itemText">设置</view>
+        </view>
+        <view class="arrow">&gt;</view>
+      </view>
+
+      <view class="menuItem" @click="goHelpCenter">
+        <view class="leftWrap">
+          <image class="itemIconImage" src="/static/my/帮助.png" mode="aspectFit" />
+          <view class="itemText">帮助与反馈</view>
         </view>
         <view class="arrow">&gt;</view>
       </view>
@@ -57,11 +81,15 @@ export default {
   data() {
     return {
       account: "",
+      role: "",
       nickname: "",
       avatar: ""
     }
   },
   computed: {
+    isAdmin() {
+      return String(this.role || "").trim() === "admin"
+    },
     avatarText() {
       const source = String(this.nickname || this.account || "").trim()
       if (!source) return "U"
@@ -76,20 +104,57 @@ export default {
     }
 
     this.account = session.username || ""
-    const profile = uni.getStorageSync(profileStorageKey(this.account)) || {}
-    const savedNick = String(profile.nickname || "").trim()
-    this.nickname = savedNick || this.account
-    this.avatar = normalizeAvatar(profile.avatar)
+    this.role = String(session.role || "").trim()
+    this.loadProfileFromCache()
+    this.syncProfileFromServer()
   },
   methods: {
+    loadProfileFromCache() {
+      const profile = uni.getStorageSync(profileStorageKey(this.account)) || {}
+      const savedNick = String(profile.nickname || "").trim()
+      this.nickname = savedNick || this.account
+      this.avatar = normalizeAvatar(profile.avatar || profile.avatarUrl)
+    },
+    async syncProfileFromServer() {
+      try {
+        const res = await uni.request({
+          url: `${BASE_URL}/me/profile`,
+          method: "GET"
+        })
+        const payload = (res && res.data) || {}
+        if (!payload.ok || !payload.data) return
+        const profile = payload.data
+        this.nickname = String(profile.nickname || "").trim() || this.account
+        this.avatar = normalizeAvatar(profile.avatarUrl)
+        uni.setStorageSync(profileStorageKey(this.account), {
+          account: this.account,
+          role: this.role,
+          nickname: this.nickname,
+          phone: String(profile.phone || "").trim(),
+          className: String(profile.className || "").trim(),
+          studentNo: String(profile.studentNo || "").trim(),
+          jobNo: String(profile.jobNo || "").trim(),
+          avatar: String(profile.avatarUrl || "").trim()
+        })
+      } catch (e) {}
+    },
     goProfile() {
       uni.navigateTo({ url: "/pages/my/profile" })
     },
     goReservations() {
       uni.navigateTo({ url: "/pages/my/reservations" })
     },
+    goBorrowings() {
+      uni.navigateTo({ url: "/pages/my/borrowings" })
+    },
+    goRepairOrders() {
+      uni.navigateTo({ url: "/pages/my/repair_orders" })
+    },
     goSettings() {
       uni.navigateTo({ url: "/pages/settings/settings" })
+    },
+    goHelpCenter() {
+      uni.navigateTo({ url: "/pages/help/index" })
     },
     handleLogout() {
       uni.removeStorageSync("session")
@@ -203,13 +268,9 @@ page {
   min-width: 0;
 }
 
-.itemIcon {
+.itemIconImage {
   width: 24px;
   height: 24px;
-  font-size: 24px;
-  line-height: 24px;
-  color: var(--color-text-primary);
-  text-align: center;
   margin-right: 16px;
   flex-shrink: 0;
 }

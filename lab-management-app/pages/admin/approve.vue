@@ -12,7 +12,7 @@
         <view class="tab" :class="{on: filter==='approved'}" @click="setFilter('approved')">已通过</view>
         <view class="tab" :class="{on: filter==='rejected'}" @click="setFilter('rejected')">已驳回</view>
         <view class="tab" :class="{on: filter==='cancelled'}" @click="setFilter('cancelled')">已取消</view>
-        <button class="btnGhost" size="mini" @click="exportCsv">导出历史</button>
+        <button v-if="isAdmin" class="btnGhost" size="mini" @click="exportCsv">导出历史</button>
       </view>
 
       <view class="card filterCard">
@@ -40,7 +40,7 @@
           <view class="batchActions">
             <button size="mini" class="btnGhost" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</button>
             <button size="mini" class="btnPrimary" @click="batchApprove" :disabled="selectedIds.length===0">批量通过</button>
-            <button size="mini" class="btnGhost" @click="batchCancel" :disabled="selectedIds.length===0">批量取消</button>
+            <button v-if="isAdmin" size="mini" class="btnGhost" @click="batchCancel" :disabled="selectedIds.length===0">批量取消</button>
           </view>
         </view>
       </view>
@@ -63,13 +63,17 @@
         <view class="meta" v-if="r.reason">用途: {{ r.reason }}</view>
         <view class="meta" v-if="r.status==='rejected' && r.rejectReason">驳回原因: {{ r.rejectReason }}</view>
         <view class="meta" v-if="r.adminNote">管理员备注: {{ r.adminNote }}</view>
+        <view class="meta aiMeta" v-if="aiSuggestionSummary(r.id)">{{ aiSuggestionSummary(r.id) }}</view>
 
         <view class="actions">
           <button size="mini" class="btnGhost" @click="goDetail(r.id)">详情</button>
+          <button v-if="r.status==='pending'" size="mini" class="btnGhost" :disabled="aiSuggestLoadingId === r.id" @click="showAiSuggestion(r)">
+            {{ aiSuggestLoadingId === r.id ? "AI分析中..." : "AI建议" }}
+          </button>
           <view class="spacer" />
           <button v-if="r.status==='pending'" size="mini" class="btnPrimary" @click="approve(r.id)">通过</button>
           <button v-if="r.status==='pending'" size="mini" class="btnGhost" @click="reject(r.id)">驳回</button>
-          <button v-if="r.status==='pending'" size="mini" class="btnGhost" @click="note(r)">备注</button>
+          <button v-if="r.status==='pending' && isAdmin" size="mini" class="btnGhost" @click="note(r)">备注</button>
         </view>
       </view>
 
@@ -79,13 +83,16 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, getReservationAiSuggestion } from "@/common/api.js"
 
 export default {
   data() {
     return {
+      role: "",
       list: [],
       filter: "pending",
+      aiSuggestLoadingId: 0,
+      aiSuggestionMap: {},
       selectedIds: [],
       search: {
         labKeyword: "",
@@ -97,7 +104,9 @@ export default {
   },
   onShow() {
     const s = uni.getStorageSync("session")
-    if (!s || s.role !== "admin") {
+    const role = String((s && s.role) || "").trim()
+    this.role = role
+    if (!s || (role !== "admin" && role !== "teacher")) {
       uni.showToast({ title: "无权限", icon: "none" })
       uni.reLaunch({ url: "/pages/login/login" })
       return
@@ -105,6 +114,9 @@ export default {
     this.fetchList()
   },
   computed: {
+    isAdmin() {
+      return this.role === "admin"
+    },
     shown() {
       if (this.filter === "all") return this.list
       return this.list.filter(x => x.status === this.filter)
@@ -120,6 +132,21 @@ export default {
       if (s === "rejected") return "已驳回"
       if (s === "cancelled") return "已取消"
       return s
+    },
+    decisionText(decision) {
+      if (decision === "approve") return "建议通过"
+      if (decision === "reject") return "建议驳回"
+      if (decision === "review") return "建议转人工复核"
+      return decision || "-"
+    },
+    aiSuggestionSummary(id) {
+      const row = this.aiSuggestionMap[String(id)] || {}
+      const suggestion = row && row.suggestion ? row.suggestion : {}
+      const summary = String(suggestion.summary || "").trim()
+      if (summary) return `AI：${summary}`
+      const decision = this.decisionText(String(suggestion.decision || "").trim())
+      if (!decision || decision === "-") return ""
+      return `AI：${decision}`
     },
     setFilter(f) {
       this.filter = f
@@ -190,6 +217,10 @@ export default {
     batchAction(action) {
       const actionText = action === "approve" ? "批量通过" : "批量取消"
       if (!this.selectedIds.length) return
+      if (action === "cancel" && !this.isAdmin) {
+        uni.showToast({ title: "仅管理员可批量取消", icon: "none" })
+        return
+      }
       uni.showModal({
         title: `确认${actionText}`,
         content: `将对 ${this.selectedIds.length} 条预约执行${actionText}，是否继续？`,
@@ -221,6 +252,7 @@ export default {
             if (Array.isArray(data.invalidScheduleIds) && data.invalidScheduleIds.length) lines.push(`时间规则不符: ${data.invalidScheduleIds.length}`)
             if (Array.isArray(data.notFoundIds) && data.notFoundIds.length) lines.push(`不存在: ${data.notFoundIds.length}`)
             if (Array.isArray(data.busyIds) && data.busyIds.length) lines.push(`并发占用: ${data.busyIds.length}`)
+            if (Array.isArray(data.forbiddenIds) && data.forbiddenIds.length) lines.push(`无审批权限: ${data.forbiddenIds.length}`)
           }
           uni.showModal({
             title: "批量操作结果",
@@ -232,6 +264,47 @@ export default {
         },
         fail: () => uni.showToast({ title: "请求失败", icon: "none" })
       })
+    },
+    async showAiSuggestion(row) {
+      const id = row && row.id
+      if (!id || this.aiSuggestLoadingId) return
+      this.aiSuggestLoadingId = id
+      try {
+        const res = await getReservationAiSuggestion(id)
+        const payload = (res && res.data) || {}
+        const data = payload && payload.data ? payload.data : {}
+        const suggestion = data && data.suggestion ? data.suggestion : {}
+        if (!payload.ok || !suggestion) {
+          uni.showToast({ title: payload.msg || "AI建议获取失败", icon: "none" })
+          return
+        }
+        this.aiSuggestionMap = { ...this.aiSuggestionMap, [String(id)]: data }
+        const reasons = Array.isArray(suggestion.reasons) ? suggestion.reasons : []
+        const risks = Array.isArray(suggestion.risks) ? suggestion.risks : []
+        const actions = Array.isArray(suggestion.nextActions) ? suggestion.nextActions : []
+        const alternatives = Array.isArray(suggestion.alternatives) ? suggestion.alternatives : []
+        const lines = [
+          `建议：${this.decisionText(suggestion.decision)}`,
+          `评分：${suggestion.score || 0}`,
+          suggestion.summary || ""
+        ]
+        if (reasons.length) lines.push(`依据：${reasons.join("；")}`)
+        if (risks.length) lines.push(`风险：${risks.join("；")}`)
+        if (actions.length) lines.push(`建议动作：${actions.join("；")}`)
+        if (alternatives.length) {
+          const altLines = alternatives.map((item, idx) => `${idx + 1}. ${item.labName} ${item.date} ${item.time}`)
+          lines.push(`替代方案：${altLines.join("；")}`)
+        }
+        uni.showModal({
+          title: "AI审批建议",
+          content: lines.filter(Boolean).join("\n"),
+          showCancel: false
+        })
+      } catch (e) {
+        uni.showToast({ title: "AI建议获取失败", icon: "none" })
+      } finally {
+        this.aiSuggestLoadingId = 0
+      }
     },
     approve(id) {
       uni.showModal({
@@ -364,6 +437,7 @@ export default {
 .left { display:flex; align-items:center; gap:8px; }
 .name{ font-weight:600; }
 .meta{ margin-top:6px; color:#64748b; font-size:12px; }
+.aiMeta{ color:#1d4ed8; }
 
 .status{ font-size:12px; padding:4px 8px; border-radius:999px; }
 .pending{ background:#fff7e6; color:#8a5a00; }

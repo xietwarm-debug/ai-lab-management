@@ -22,9 +22,9 @@
       <view class="card actions">
         <button size="mini" class="btnPrimary" @click="approve" v-if="data.status==='pending'">通过</button>
         <button size="mini" class="btnGhost" @click="reject" v-if="data.status==='pending'">驳回</button>
-        <button size="mini" class="btnGhost" @click="note">备注</button>
-        <button size="mini" class="btnGhost" @click="openReschedule">改期</button>
-        <button size="mini" class="btnGhost" @click="adminCancel">取消预约</button>
+        <button v-if="isAdmin" size="mini" class="btnGhost" @click="note">备注</button>
+        <button v-if="isAdmin" size="mini" class="btnGhost" @click="openReschedule">改期</button>
+        <button v-if="isAdmin" size="mini" class="btnGhost" @click="adminCancel">取消预约</button>
       </view>
     </view>
 
@@ -32,7 +32,7 @@
       <view class="modalCard stack" @click.stop>
         <view class="modalTitle">改期</view>
         <view class="label">日期</view>
-        <picker mode="date" :value="rescheduleDate" @change="e => rescheduleDate = e.detail.value">
+        <picker mode="date" :value="rescheduleDate" :start="rules.minDate" :end="rules.maxDate" @change="e => rescheduleDate = e.detail.value">
           <view class="calendarBtn">点击选择日期</view>
         </picker>
         <view class="label">时间段</view>
@@ -71,32 +71,51 @@ import { BASE_URL } from "@/common/api.js"
 export default {
   data() {
     return {
+      role: "",
       id: "",
       data: {},
       showReschedule: false,
       rescheduleDate: "",
       rescheduleTimes: [],
       timeSlotsMorning: [
-        "8:00-8:40",
-        "8:45-9:35",
+        "08:00-08:40",
+        "08:45-09:35",
         "10:25-11:05",
         "11:10-11:50"
       ],
       timeSlotsAfternoon: [
-        "2:30-3:10",
-        "3:15-3:55",
-        "4:05-4:45",
-        "4:50-5:30",
-        "7:00-7:40",
-        "7:45-8:25"
-      ]
+        "14:30-15:10",
+        "15:15-15:55",
+        "16:05-16:45",
+        "16:50-17:30",
+        "19:00-19:40",
+        "19:45-20:25"
+      ],
+      rules: {
+        minDate: "",
+        maxDate: "",
+        slots: []
+      }
     }
   },
   onLoad(options) {
     this.id = options.id || ""
   },
   onShow() {
+    const s = uni.getStorageSync("session")
+    const role = String((s && s.role) || "").trim()
+    this.role = role
+    if (!s || (role !== "admin" && role !== "teacher")) {
+      uni.showToast({ title: "无权限", icon: "none" })
+      uni.reLaunch({ url: "/pages/login/login" })
+      return
+    }
     this.fetch()
+  },
+  computed: {
+    isAdmin() {
+      return this.role === "admin"
+    }
   },
   methods: {
     statusText(s) {
@@ -114,8 +133,40 @@ export default {
         success: (res) => {
           if (!res.data || !res.data.ok) return
           this.data = res.data.data || {}
+          this.fetchReservationRules(this.data.labName || "")
         }
       })
+    },
+    fetchReservationRules(labName) {
+      const query = labName ? `?labName=${encodeURIComponent(labName)}` : ""
+      uni.request({
+        url: `${BASE_URL}/reservation-rules${query}`,
+        method: "GET",
+        success: (res) => {
+          const payload = (res && res.data) || {}
+          if (!payload.ok || !payload.data) return
+          const data = payload.data || {}
+          this.rules.minDate = data.minDate || ""
+          this.rules.maxDate = data.maxDate || ""
+          this.rules.slots = Array.isArray(data.slots) ? data.slots : []
+          this.applyRuleSlots(this.rules.slots)
+          this.rescheduleTimes = this.rescheduleTimes.filter((x) => this.rules.slots.includes(x))
+        }
+      })
+    },
+    applyRuleSlots(slotList) {
+      const list = Array.isArray(slotList) ? slotList : []
+      if (list.length === 0) return
+      const morning = []
+      const afternoon = []
+      list.forEach((slot) => {
+        const text = String(slot || "").trim()
+        const hour = Number((text.split("-")[0] || "0").split(":")[0] || 0)
+        if (Number.isFinite(hour) && hour < 12) morning.push(text)
+        else afternoon.push(text)
+      })
+      this.timeSlotsMorning = morning
+      this.timeSlotsAfternoon = afternoon
     },
     openReschedule() {
       this.rescheduleDate = this.data.date || ""

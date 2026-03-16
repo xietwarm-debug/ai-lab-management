@@ -1,5 +1,7 @@
 ﻿<script>
 import { BASE_URL } from "@/common/api.js"
+import { applyNotificationTabBadge, refreshNotificationTabBadge } from "@/common/notifications.js"
+import { TABBAR_PAGE_ROUTES } from "@/common/session.js"
 
 const THEME_KEY = "theme"
 const THEME_LIGHT = "light"
@@ -13,8 +15,6 @@ let rawRequest = null
 let rawUploadFile = null
 let rawDownloadFile = null
 let currentTheme = THEME_LIGHT
-const TABBAR_ROUTES = new Set(["pages/index/index", "pages/agent/agent", "pages/my/my"])
-
 function normalizeTheme(theme) {
   return theme === THEME_DARK ? THEME_DARK : THEME_LIGHT
 }
@@ -46,7 +46,7 @@ function isTabBarRouteActive() {
     if (isTabBarMeta) return true
   } catch (e) {}
   const route = getCurrentRoute()
-  return !!route && TABBAR_ROUTES.has(route)
+  return !!route && TABBAR_PAGE_ROUTES.has(route)
 }
 
 function safeInvokeUni(apiFn, options) {
@@ -76,7 +76,7 @@ function syncThemeToRuntime(nextTheme) {
   const tabBg = isDark ? "#141d2a" : "#ffffff"
   const tabColor = isDark ? "#9aa7ba" : "#64748b"
   const tabSelected = isDark ? "#5ca2ff" : "#1677ff"
-  const tabText = ["首页", "智能助手", "我的"]
+  const tabText = ["首页", "智能助手", "功能大厅", "我的"]
   const hasPage = !!getCurrentRoute()
 
   const applyTabBarRuntime = () => {
@@ -154,10 +154,22 @@ function getToken() {
   return s.token || ""
 }
 
+function resolveDeviceName() {
+  try {
+    const info = uni.getSystemInfoSync() || {}
+    const platform = String(info.platform || info.system || "").trim()
+    const model = String(info.model || info.deviceBrand || "").trim()
+    return `${platform} ${model}`.trim().slice(0, 80)
+  } catch (e) {
+    return ""
+  }
+}
+
 function scheduleRelogin() {
   if (reloginScheduled) return
   reloginScheduled = true
   uni.removeStorageSync("session")
+  applyNotificationTabBadge(0)
   uni.showToast({ title: "登录已过期，请重新登录", icon: "none" })
   setTimeout(() => {
     uni.reLaunch({ url: "/pages/login/login" })
@@ -188,7 +200,7 @@ function refreshAccessToken() {
       url: `${BASE_URL}/auth/refresh`,
       method: "POST",
       header: { "Content-Type": "application/json" },
-      data: { refreshToken: s.refreshToken },
+      data: { refreshToken: s.refreshToken, deviceName: resolveDeviceName() },
       success: (res) => {
         if (res.data && res.data.ok && res.data.data && res.data.data.token && res.data.data.refreshToken) {
           uni.setStorageSync("session", res.data.data)
@@ -281,6 +293,10 @@ function installNetworkWrappers() {
   uni.downloadFile = wrapNetworkApi(rawDownloadFile)
 }
 
+function refreshNotificationBadgeSafe() {
+  refreshNotificationTabBadge().catch(() => {})
+}
+
 export default {
   globalData: {
     theme: THEME_LIGHT
@@ -300,12 +316,22 @@ export default {
 
     const session = getSession()
     if (!session.username || !session.token || !session.refreshToken) {
+      applyNotificationTabBadge(0)
       uni.reLaunch({ url: "/pages/login/login" })
+      return
     }
+    refreshNotificationBadgeSafe()
   },
   onShow() {
     const nextTheme = applyTheme(normalizeTheme((this.globalData && this.globalData.theme) || getStoredTheme()))
     this.globalData.theme = nextTheme
+
+    const session = getSession()
+    if (!session.username || !session.token) {
+      applyNotificationTabBadge(0)
+      return
+    }
+    refreshNotificationBadgeSafe()
   }
 }
 </script>

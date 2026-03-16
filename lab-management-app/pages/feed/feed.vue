@@ -4,25 +4,25 @@
       <view class="card heroCard">
         <view class="rowBetween">
           <view>
-            <view class="title">动态</view>
-            <view class="subtitle">系统公告与校园服务更新</view>
+            <view class="title">Campus Feed</view>
+            <view class="subtitle">System announcements and service updates</view>
           </view>
-          <button class="btnSecondary miniBtn" size="mini" :loading="loading" @click="refreshFeed">刷新</button>
+          <button class="btnSecondary miniBtn" size="mini" :loading="loading" @click="refreshFeed">Refresh</button>
         </view>
       </view>
 
       <view class="card">
         <view class="rowBetween">
-          <view class="cardTitle">最新动态</view>
-          <view class="muted">{{ feedList.length }} 条</view>
+          <view class="cardTitle">Latest updates</view>
+          <view class="muted">{{ feedList.length }} items</view>
         </view>
 
-        <view v-if="loading" class="empty">加载中...</view>
+        <view v-if="loading" class="empty">Loading...</view>
 
         <view v-else-if="feedList.length === 0" class="emptyState compactEmpty">
-          <view class="emptyIcon">动</view>
-          <view class="emptyTitle">暂无动态</view>
-          <view class="emptySub">管理员发布公告后会显示在这里</view>
+          <view class="emptyIcon">N</view>
+          <view class="emptyTitle">No updates</view>
+          <view class="emptySub">Announcements will appear here after they are published.</view>
         </view>
 
         <view v-else class="stack feedList">
@@ -41,15 +41,8 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { fetchAnnouncementRows } from "@/common/announcements.js"
 import { themePageMixin } from "@/common/theme.js"
-
-function parseListPayload(payload) {
-  if (Array.isArray(payload)) return payload
-  if (payload && Array.isArray(payload.data)) return payload.data
-  if (payload && payload.ok && Array.isArray(payload.data)) return payload.data
-  return []
-}
 
 export default {
   mixins: [themePageMixin],
@@ -72,21 +65,21 @@ export default {
       if (this.loading) return
       this.loading = true
       try {
-        const res = await uni.request({
-          url: `${BASE_URL}/announcements?limit=50`,
-          method: "GET"
-        })
-        const rows = parseListPayload(res && res.data)
+        const result = await fetchAnnouncementRows({ limit: 50, retries: 1, maxAgeMs: 5 * 60 * 1000 })
+        const rows = Array.isArray(result && result.rows) ? result.rows : []
         this.feedList = rows.map((row) => ({
           id: `announcement-${row.id}`,
-          type: "系统公告",
-          title: row.title || "未命名公告",
+          type: "Announcement",
+          title: row.title || "Untitled announcement",
           desc: row.content || "",
           time: row.createdAt || "-"
         }))
+        if (result && result.stale) {
+          uni.showToast({ title: "Showing cached feed", icon: "none" })
+        }
       } catch (e) {
         this.feedList = []
-        uni.showToast({ title: "动态加载失败", icon: "none" })
+        uni.showToast({ title: "Feed load failed", icon: "none" })
       } finally {
         this.loading = false
       }

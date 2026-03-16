@@ -1,5 +1,6 @@
-﻿const THEME_KEY = "theme"
-const TABBAR_ROUTES = new Set(["pages/index/index", "pages/agent/agent", "pages/my/my"])
+import { TABBAR_PAGE_ROUTES } from "@/common/session.js"
+
+const THEME_KEY = "theme"
 const IS_H5_RUNTIME = typeof window !== "undefined" && typeof document !== "undefined"
 
 export function normalizeTheme(theme) {
@@ -41,7 +42,7 @@ function isTabBarRouteActive() {
     if (isTabBarMeta) return true
   } catch (e) {}
   const route = getCurrentRoute()
-  return !!route && TABBAR_ROUTES.has(route)
+  return !!route && TABBAR_PAGE_ROUTES.has(route)
 }
 
 function safeInvokeUni(apiFn, options) {
@@ -73,7 +74,7 @@ function syncNativeBars(theme) {
   const tabBg = isDark ? "#141d2a" : "#ffffff"
   const tabColor = isDark ? "#9aa7ba" : "#64748b"
   const tabSelected = isDark ? "#5ca2ff" : "#1677ff"
-  const tabText = ["首页", "智能助手", "我的"]
+  const tabText = ["首页", "智能助手", "功能大厅", "我的"]
   const hasPage = !!getCurrentRoute()
 
   if (hasPage) {

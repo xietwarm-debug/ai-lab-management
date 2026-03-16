@@ -2,106 +2,396 @@
   "pages": [
     {
       "path": "pages/login/login",
-      "style": { "navigationBarTitleText": "登录" }
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
     },
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "首页" }
+      "style": {
+        "navigationBarTitleText": "",
+        "navigationStyle": "custom"
+      }
     },
     {
       "path": "pages/feed/feed",
-      "style": { "navigationBarTitleText": "动态" }
+      "style": {
+        "navigationBarTitleText": "动态"
+      }
     },
     {
       "path": "pages/notifications/list",
-      "style": { "navigationBarTitleText": "通知中心" }
+      "style": {
+        "navigationBarTitleText": "通知中心"
+      }
     },
     {
       "path": "pages/my/my",
-      "style": { "navigationBarTitleText": "我的" }
+      "style": {
+        "navigationBarTitleText": "",
+        "navigationStyle": "custom"
+      }
     },
     {
       "path": "pages/my/reservations",
-      "style": { "navigationBarTitleText": "我的预约" }
+      "style": {
+        "navigationBarTitleText": "我的预约"
+      }
+    },
+    {
+      "path": "pages/my/borrowings",
+      "style": {
+        "navigationBarTitleText": "我的借用"
+      }
+    },
+    {
+      "path": "pages/my/repair_orders",
+      "style": {
+        "navigationBarTitleText": "我的报修工单"
+      }
     },
     {
       "path": "pages/my/profile",
-      "style": { "navigationBarTitleText": "用户信息" }
+      "style": {
+        "navigationBarTitleText": "用户信息"
+      }
     },
     {
       "path": "pages/settings/settings",
-      "style": { "navigationBarTitleText": "账号设置" }
+      "style": {
+        "navigationBarTitleText": "账号设置"
+      }
     },
     {
       "path": "pages/user/home",
-      "style": { "navigationBarTitleText": "用户首页" }
+      "style": {
+        "navigationBarTitleText": "用户首页"
+      }
+    },
+    {
+      "path": "pages/student/progress",
+      "style": {
+        "navigationBarTitleText": "Progress Center"
+      }
+    },
+    {
+      "path": "pages/student/attendance",
+      "style": {
+        "navigationBarTitleText": "Class Attendance"
+      }
+    },
+    {
+      "path": "pages/teacher/hall",
+      "style": {
+        "navigationBarTitleText": "教师功能大厅"
+      }
+    },
+    {
+      "path": "pages/teacher/homework_review",
+      "style": {
+        "navigationBarTitleText": "作业批改"
+      }
+    },
+    {
+      "path": "pages/teacher/courses",
+      "style": {
+        "navigationBarTitleText": "课程管理"
+      }
+    },
+    {
+      "path": "pages/teacher/course_form",
+      "style": {
+        "navigationBarTitleText": "课程编辑"
+      }
+    },
+    {
+      "path": "pages/teacher/course_detail",
+      "style": {
+        "navigationBarTitleText": "课程详情"
+      }
+    },
+    {
+      "path": "pages/teacher/task_form",
+      "style": {
+        "navigationBarTitleText": "任务编辑"
+      }
+    },
+    {
+      "path": "pages/teacher/task_student_files",
+      "style": {
+        "navigationBarTitleText": "学生文件"
+      }
+    },
+    {
+      "path": "pages/teacher/course_students",
+      "style": {
+        "navigationBarTitleText": "班级管理"
+      }
+    },
+    {
+      "path": "pages/teacher/attendance",
+      "style": {
+        "navigationBarTitleText": "Attendance Control"
+      }
+    },
+    {
+      "path": "pages/teacher/review_workspace",
+      "style": {
+        "navigationBarTitleText": "Rubric Review"
+      }
     },
     {
       "path": "pages/labs/labs",
-      "style": { "navigationBarTitleText": "实验室列表" }
+      "style": {
+        "navigationBarTitleText": "实验室列表"
+      }
     },
     {
       "path": "pages/labs/detail",
-      "style": { "navigationBarTitleText": "实验室详情" }
+      "style": {
+        "navigationBarTitleText": "实验室详情"
+      }
     },
     {
       "path": "pages/labs/calendar",
-      "style": { "navigationBarTitleText": "实验室日历" }
+      "style": {
+        "navigationBarTitleText": "实验室日历"
+      }
     },
     {
       "path": "pages/lostfound/list",
-      "style": { "navigationBarTitleText": "失物招领" }
+      "style": {
+        "navigationBarTitleText": "失物招领"
+      }
     },
     {
       "path": "pages/lostfound/post",
-      "style": { "navigationBarTitleText": "发布失物" }
+      "style": {
+        "navigationBarTitleText": "发布失物"
+      }
     },
     {
       "path": "pages/reserve/reserve",
-      "style": { "navigationBarTitleText": "预约实验室" }
+      "style": {
+        "navigationBarTitleText": "预约实验室"
+      }
+    },
+    {
+      "path": "pages/borrow/apply",
+      "style": {
+        "navigationBarTitleText": "资产借用申请"
+      }
+    },
+    {
+      "path": "pages/help/index",
+      "style": {
+        "navigationBarTitleText": "帮助与反馈"
+      }
+    },
+    {
+      "path": "pages/help/faq",
+      "style": {
+        "navigationBarTitleText": "常见问题"
+      }
+    },
+    {
+      "path": "pages/help/feedback",
+      "style": {
+        "navigationBarTitleText": "在线反馈"
+      }
+    },
+    {
+      "path": "pages/help/support",
+      "style": {
+        "navigationBarTitleText": "客服入口"
+      }
     },
     {
       "path": "pages/agent/agent",
-      "style": { "navigationBarTitleText": "智能助手" }
+      "style": {
+        "navigationBarTitleText": "",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/workbench/index",
+      "style": {
+        "navigationBarTitleText": "",
+        "enablePullDownRefresh": true,
+        "navigationStyle": "custom"
+      }
     },
     {
       "path": "pages/admin/admin",
       "style": {
-        "navigationBarTitleText": "管理员",
+        "navigationBarTitleText": "",
+        "enablePullDownRefresh": true,
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/admin/announcements",
+      "style": {
+        "navigationBarTitleText": "公告中心",
         "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/admin/labs",
-      "style": { "navigationBarTitleText": "实验室管理" }
+      "style": {
+        "navigationBarTitleText": "管理员实验室列表"
+      }
+    },
+    {
+      "path": "pages/admin/room_map",
+      "style": {
+        "navigationBarTitleText": "机房布局编辑"
+      }
+    },
+    {
+      "path": "pages/admin/equipments",
+      "style": {
+        "navigationBarTitleText": "资产管理",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/admin/equipment_edit",
+      "style": {
+        "navigationBarTitleText": "编辑设备"
+      }
+    },
+    {
+      "path": "pages/admin/repair_orders",
+      "style": {
+        "navigationBarTitleText": "报修工单管理"
+      }
     },
     {
       "path": "pages/admin/lab-edit",
-      "style": { "navigationBarTitleText": "编辑实验室" }
+      "style": {
+        "navigationBarTitleText": "编辑实验室"
+      }
     },
     {
       "path": "pages/admin/lostfound",
-      "style": { "navigationBarTitleText": "失物招领管理" }
+      "style": {
+        "navigationBarTitleText": "失物招领管理"
+      }
     },
     {
       "path": "pages/admin/approve",
-      "style": { "navigationBarTitleText": "预约审批" }
+      "style": {
+        "navigationBarTitleText": "预约审批"
+      }
+    },
+    {
+      "path": "pages/admin/borrow_approval",
+      "style": {
+        "navigationBarTitleText": "租借审批中心"
+      }
     },
     {
       "path": "pages/admin/approve-detail",
-      "style": { "navigationBarTitleText": "预约详情" }
+      "style": {
+        "navigationBarTitleText": "预约详情"
+      }
     },
     {
       "path": "pages/admin/audit",
-      "style": { "navigationBarTitleText": "审计日志" }
+      "style": {
+        "navigationBarTitleText": "审计日志"
+      }
     },
     {
       "path": "pages/admin/stats",
-      "style": { "navigationBarTitleText": "后台数据" }
+      "style": {
+        "navigationBarTitleText": "后台数据"
+      }
+    },
+    {
+      "path": "pages/admin/knowledge_base",
+      "style": {
+        "navigationBarTitleText": "知识库管理"
+      }
+    },
+    {
+      "path": "pages/admin/report_center",
+      "style": {
+        "navigationBarTitleText": "数据报表中心"
+      }
+    },
+    {
+      "path": "pages/admin/reservation_board",
+      "style": {
+        "navigationBarTitleText": "预约排班看板"
+      }
+    },
+    {
+      "path": "pages/admin/reservation_rules",
+      "style": {
+        "navigationBarTitleText": "预约规则配置"
+      }
+    },
+    {
+      "path": "pages/admin/reservation_priority",
+      "style": {
+        "navigationBarTitleText": "Reservation Priority"
+      }
     },
     {
       "path": "pages/admin/users",
-      "style": { "navigationBarTitleText": "用户管理" }
+      "style": {
+        "navigationBarTitleText": "用户管理"
+      }
+    },
+    {
+      "path": "pages/admin/user_detail",
+      "style": {
+        "navigationBarTitleText": "用户详情"
+      }
+    },
+    {
+      "path": "pages/admin/todo_center",
+      "style": {
+        "navigationBarTitleText": "管理待办中心"
+      }
+    },
+    {
+      "path": "pages/admin/schedule_manage",
+      "style": {
+        "navigationBarTitleText": "课表管理"
+      }
+    },
+    {
+      "path": "pages/admin/schedule_import",
+      "style": {
+        "navigationBarTitleText": "课表导入"
+      }
+    },
+    {
+      "path": "pages/admin/schedule_week_overview",
+      "style": {
+        "navigationBarTitleText": "当周课表总览"
+      }
+    },
+    {
+      "path": "pages/admin/door_reminders_today",
+      "style": {
+        "navigationBarTitleText": "今日开门提醒"
+      }
+    },
+    {
+      "path": "pages/admin/door_reminder_logs",
+      "style": {
+        "navigationBarTitleText": "提醒记录"
+      }
+    },
+    {
+      "path": "pages/admin/lab_schedule_detail",
+      "style": {
+        "navigationBarTitleText": "实验室课表详情"
+      }
     }
   ],
   "tabBar": {
@@ -113,20 +403,26 @@
       {
         "pagePath": "pages/index/index",
         "text": "首页",
-        "iconPath": "static/logo.png",
-        "selectedIconPath": "static/logo.png"
+        "iconPath": "static/首页.png",
+        "selectedIconPath": "static/首页.png"
       },
       {
         "pagePath": "pages/agent/agent",
         "text": "AI助手",
-        "iconPath": "static/logo.png",
-        "selectedIconPath": "static/logo.png"
+        "iconPath": "static/AI助手.png",
+        "selectedIconPath": "static/AI助手.png"
+      },
+      {
+        "pagePath": "pages/workbench/index",
+        "text": "功能大厅",
+        "iconPath": "static/功能大厅.png",
+        "selectedIconPath": "static/功能大厅.png"
       },
       {
         "pagePath": "pages/my/my",
         "text": "我的",
-        "iconPath": "static/logo.png",
-        "selectedIconPath": "static/logo.png"
+        "iconPath": "static/我的.png",
+        "selectedIconPath": "static/我的.png"
       }
     ]
   },

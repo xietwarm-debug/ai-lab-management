@@ -63,7 +63,7 @@
         <view class="emptyState compactEmpty" v-else-if="latestNotifications.length === 0">
           <view class="emptyIcon">信</view>
           <view class="emptyTitle">暂无新动态</view>
-          <view class="emptySub">预约状态和失物消息会在这里显示</view>
+          <view class="emptySub">预约、借用和失物消息会在这里显示</view>
         </view>
 
         <view class="activityList" v-else>
@@ -100,26 +100,23 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
-
-function parseListPayload(payload) {
-  if (Array.isArray(payload)) return payload
-  if (payload && Array.isArray(payload.data)) return payload.data
-  if (payload && payload.ok && Array.isArray(payload.data)) return payload.data
-  return []
-}
+import { BASE_URL, getApiListData } from "@/common/api.js"
+import {
+  applyNotificationTabBadge,
+  countNotificationUnread,
+  fetchNotificationRows,
+  fetchNotificationReadState,
+  isNotificationUnread,
+  loadNotificationReadStateFromStorage,
+  mergeNotificationReadState,
+  persistNotificationReadStateToStorage,
+  updateNotificationReadStatePatch
+} from "@/common/notifications.js"
 
 function nowTimeText() {
   const d = new Date()
   const p = (n) => (n < 10 ? `0${n}` : `${n}`)
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-
-function getReadKey(username) {
-  return {
-    reservation: `notifications_last_read_reservation_${username}`,
-    lostfound: `notifications_last_read_lostfound_${username}`
-  }
 }
 
 function sortedByCreatedAtDesc(rows) {
@@ -138,12 +135,17 @@ export default {
       myReservations: [],
       unreadCount: 0,
       reservationUnreadCount: 0,
+      borrowUnreadCount: 0,
       lostFoundUnreadCount: 0,
       pendingReserveCount: 0,
       approvedReserveCount: 0,
       myReservationCount: 0,
       lastReadReservation: "",
-      lastReadLostfound: ""
+      lastReadAssetBorrow: "",
+      lastReadRepair: "",
+      lastReadAlarm: "",
+      lastReadLostfound: "",
+      lastReadCourseTask: ""
     }
   },
   computed: {
@@ -212,6 +214,30 @@ export default {
           badge: this.pendingReserveCount
         },
         {
+          key: "myBorrowings",
+          icon: "借",
+          name: "我的借用",
+          desc: "借用申请与归还状态",
+          tone: "green",
+          badge: this.borrowUnreadCount
+        },
+        {
+          key: "progress",
+          icon: "进",
+          name: "进度中心",
+          desc: "作业、预约、借用、签到总览",
+          tone: "blue",
+          badge: this.pendingReserveCount
+        },
+        {
+          key: "attendance",
+          icon: "签",
+          name: "课堂签到",
+          desc: "查看开放签到并完成打卡",
+          tone: "amber",
+          badge: 0
+        },
+        {
           key: "notifications",
           icon: "讯",
           name: "通知中心",
@@ -233,10 +259,25 @@ export default {
       return sortedByCreatedAtDesc(this.allNotifications).slice(0, 3)
     }
   },
+  watch: {
+    unreadCount(value) {
+      applyNotificationTabBadge(value)
+    }
+  },
   onShow() {
     this.bootstrap()
   },
   methods: {
+    currentReadState() {
+      return {
+        reservation: this.lastReadReservation,
+        asset_borrow: this.lastReadAssetBorrow,
+        repair: this.lastReadRepair,
+        sensor_alarm: this.lastReadAlarm,
+        lostfound: this.lastReadLostfound,
+        course_task: this.lastReadCourseTask
+      }
+    },
     bootstrap() {
       const s = uni.getStorageSync("session")
       this.user = s && s.username ? s.username : ""
@@ -245,17 +286,37 @@ export default {
         uni.reLaunch({ url: "/pages/login/login" })
         return
       }
-      const keys = getReadKey(this.user)
-      this.lastReadReservation = uni.getStorageSync(keys.reservation) || ""
-      this.lastReadLostfound = uni.getStorageSync(keys.lostfound) || ""
+      this.loadReadStateFromLocal()
       this.fetchDashboard()
+    },
+    loadReadStateFromLocal() {
+      this.applyReadState(loadNotificationReadStateFromStorage(this.user, this.currentReadState()))
+    },
+    persistReadStateToLocal() {
+      persistNotificationReadStateToStorage(this.user, this.currentReadState())
+    },
+    applyReadState(rawState) {
+      const normalized = mergeNotificationReadState(this.currentReadState(), rawState)
+      this.lastReadReservation = normalized.reservation
+      this.lastReadAssetBorrow = normalized.asset_borrow
+      this.lastReadRepair = normalized.repair
+      this.lastReadAlarm = normalized.sensor_alarm
+      this.lastReadLostfound = normalized.lostfound
+      this.lastReadCourseTask = normalized.course_task
+      this.persistReadStateToLocal()
+    },
+    async fetchReadState() {
+      try {
+        const state = await fetchNotificationReadState(this.currentReadState())
+        this.applyReadState(state)
+      } catch (e) {}
     },
     requestList(url) {
       return new Promise((resolve, reject) => {
         uni.request({
           url,
           method: "GET",
-          success: (res) => resolve(parseListPayload(res.data)),
+          success: (res) => resolve(getApiListData(res.data)),
           fail: (err) => reject(err)
         })
       })
@@ -264,15 +325,25 @@ export default {
       if (!this.user) return
       this.loading = true
       try {
-        const [notifications, reservations] = await Promise.all([
-          this.requestList(`${BASE_URL}/notifications`),
+        const [readResult, notificationResult, reservationResult] = await Promise.allSettled([
+          this.fetchReadState(),
+          fetchNotificationRows(this.user, { retries: 1, maxAgeMs: 60 * 1000 }),
           this.requestList(`${BASE_URL}/reservations?user=${encodeURIComponent(this.user)}`)
         ])
 
-        this.allNotifications = notifications
-        this.myReservations = reservations
+        if (readResult.status === "rejected") {
+          this.loadReadStateFromLocal()
+        }
+        this.allNotifications =
+          notificationResult.status === "fulfilled" && Array.isArray(notificationResult.value.rows)
+            ? notificationResult.value.rows
+            : []
+        this.myReservations = reservationResult.status === "fulfilled" ? reservationResult.value : []
         this.recalculateMetrics()
         this.lastSync = nowTimeText()
+        if (notificationResult.status === "fulfilled" && notificationResult.value && notificationResult.value.stale) {
+          uni.showToast({ title: "当前显示缓存通知", icon: "none" })
+        }
       } catch (e) {
         this.allNotifications = []
         this.myReservations = []
@@ -287,61 +358,56 @@ export default {
     },
     recalculateMetrics() {
       const reservations = this.myReservations
+      const readState = this.currentReadState()
       this.myReservationCount = reservations.length
       this.pendingReserveCount = reservations.filter((x) => x.status === "pending").length
       this.approvedReserveCount = reservations.filter((x) => x.status === "approved").length
 
-      const reservationUnread = this.allNotifications.filter((x) => {
-        if (x.type !== "reservation") return false
-        if (!this.lastReadReservation) return true
-        return (x.createdAt || "") > this.lastReadReservation
-      })
-      const lostfoundUnread = this.allNotifications.filter((x) => {
-        if (x.type !== "lostfound") return false
-        if (!this.lastReadLostfound) return true
-        return (x.createdAt || "") > this.lastReadLostfound
-      })
+      const reservationUnread = this.allNotifications.filter((x) => x.type === "reservation" && isNotificationUnread(x, readState))
+      const borrowUnread = this.allNotifications.filter((x) => x.type === "asset_borrow" && isNotificationUnread(x, readState))
+      const lostfoundUnread = this.allNotifications.filter((x) => x.type === "lostfound" && isNotificationUnread(x, readState))
 
       this.reservationUnreadCount = reservationUnread.length
+      this.borrowUnreadCount = borrowUnread.length
       this.lostFoundUnreadCount = lostfoundUnread.length
-      this.unreadCount = this.reservationUnreadCount + this.lostFoundUnreadCount
+      this.unreadCount = countNotificationUnread(this.allNotifications, readState)
     },
     isUnread(row) {
-      if (row.type === "reservation") {
-        if (!this.lastReadReservation) return true
-        return (row.createdAt || "") > this.lastReadReservation
-      }
-      if (row.type === "lostfound") {
-        if (!this.lastReadLostfound) return true
-        return (row.createdAt || "") > this.lastReadLostfound
-      }
-      return false
+      return isNotificationUnread(row, this.currentReadState())
     },
     latestByType(type) {
       const row = sortedByCreatedAtDesc(this.allNotifications).find((x) => x.type === type)
       return row ? row.createdAt || "" : ""
     },
-    markAllAsRead() {
+    async markAllAsRead() {
       if (!this.user || this.unreadCount === 0) return
-      const keys = getReadKey(this.user)
-      const latestReservation = this.latestByType("reservation")
-      const latestLostfound = this.latestByType("lostfound")
+      const patch = {}
+      ;["reservation", "asset_borrow", "repair", "sensor_alarm", "lostfound", "course_task"].forEach((type) => {
+        const latest = this.latestByType(type)
+        if (latest) patch[type] = latest
+      })
 
-      if (latestReservation) {
-        this.lastReadReservation = latestReservation
-        uni.setStorageSync(keys.reservation, latestReservation)
+      if (Object.keys(patch).length === 0) {
+        uni.showToast({ title: "当前没有可标记消息", icon: "none" })
+        return
       }
-      if (latestLostfound) {
-        this.lastReadLostfound = latestLostfound
-        uni.setStorageSync(keys.lostfound, latestLostfound)
+
+      try {
+        const state = await updateNotificationReadStatePatch(patch, this.currentReadState())
+        this.applyReadState(state)
+        this.recalculateMetrics()
+        uni.showToast({ title: "已标记已读", icon: "success" })
+      } catch (e) {
+        uni.showToast({ title: "标记失败", icon: "none" })
       }
-      this.recalculateMetrics()
-      uni.showToast({ title: "已标记已读", icon: "success" })
     },
     goByKey(key) {
       if (key === "labs") return this.goLabs()
       if (key === "reserve") return this.goReserve()
       if (key === "my") return this.goMy()
+      if (key === "myBorrowings") return this.goMyBorrowings()
+      if (key === "progress") return this.goProgress()
+      if (key === "attendance") return this.goAttendance()
       if (key === "notifications") return this.goNotifications()
       if (key === "lostfound") return this.goLostFound()
     },
@@ -354,6 +420,15 @@ export default {
     goMy() {
       uni.switchTab({ url: "/pages/my/my" })
     },
+    goMyBorrowings() {
+      uni.navigateTo({ url: "/pages/my/borrowings" })
+    },
+    goProgress() {
+      uni.navigateTo({ url: "/pages/student/progress" })
+    },
+    goAttendance() {
+      uni.navigateTo({ url: "/pages/student/attendance" })
+    },
     goLostFound() {
       uni.navigateTo({ url: "/pages/lostfound/list" })
     },
@@ -361,22 +436,43 @@ export default {
       uni.navigateTo({ url: "/pages/notifications/list" })
     },
     typeText(type) {
+      if (type === "asset_borrow") return "借用"
+      if (type === "repair") return "报修"
+      if (type === "sensor_alarm") return "报警"
+      if (type === "course_task") return "作业"
       if (type === "lostfound") return "失物"
       return "预约"
     },
     statusTone(status) {
+      if (status === "overdue") return "danger"
+      if (status === "reminder") return "warning"
+      if (status === "warning" || status === "alarm") return "danger"
       if (status === "approved" || status === "closed" || status === "claim_approved") return "success"
-      if (status === "pending" || status === "open" || status === "claim_pending") return "warning"
+      if (status === "pending" || status === "open" || status === "claim_pending" || status === "submitted" || status === "course_pending") {
+        return "warning"
+      }
+      if (status === "accepted" || status === "processing") return "info"
+      if (status === "completed") return "success"
       if (status === "rejected" || status === "cancelled" || status === "claim_rejected") return "danger"
       return "info"
     },
     statusText(status) {
       if (status === "pending") return "待审批"
       if (status === "approved") return "已通过"
+      if (status === "overdue") return "逾期未还"
+      if (status === "returned") return "已归还"
+      if (status === "reminder") return "归还提醒"
       if (status === "rejected") return "已驳回"
       if (status === "cancelled") return "已取消"
       if (status === "open") return "处理中"
       if (status === "closed") return "已处理"
+      if (status === "submitted") return "已提交"
+      if (status === "accepted") return "已受理"
+      if (status === "processing") return "处理中"
+      if (status === "completed") return "已完成"
+      if (status === "warning") return "预警"
+      if (status === "alarm") return "报警"
+      if (status === "course_pending") return "待提交"
       if (status === "claim_pending") return "认领待审"
       if (status === "claim_approved") return "认领通过"
       if (status === "claim_rejected") return "认领驳回"
@@ -635,6 +731,11 @@ export default {
 .activityType.lostfound {
   background: #fff7e6;
   color: #8a5a00;
+}
+
+.activityType.asset_borrow {
+  background: #effff1;
+  color: #166534;
 }
 
 .activityName {

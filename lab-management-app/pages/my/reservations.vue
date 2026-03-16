@@ -45,7 +45,13 @@
       </view>
 
       <view class="stack" v-else-if="list.length > 0">
-        <view v-for="r in list" :key="r.id" class="card reserveItem">
+        <view
+          v-for="r in list"
+          :key="r.id"
+          class="card reserveItem"
+          :id="`reservation-row-${r.id}`"
+          :class="{ focusItem: isFocused(r) }"
+        >
           <view class="rowBetween">
             <view class="reserveName">{{ r.labName || '未知实验室' }}</view>
             <view class="statusTag" :class="statusTone(r.status)">{{ statusText(r.status) }}</view>
@@ -141,10 +147,22 @@
 <script>
 import { BASE_URL } from "@/common/api.js"
 
+function toInt(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n) : 0
+}
+
+function normalizeStatusFilter(rawStatus) {
+  const status = String(rawStatus || "").trim().toLowerCase()
+  const allow = new Set(["all", "pending", "approved", "rejected", "cancelled"])
+  return allow.has(status) ? status : "all"
+}
+
 export default {
   data() {
     return {
       user: "",
+      focusReservationId: 0,
       list: [],
       loading: false,
       loadingMore: false,
@@ -164,17 +182,25 @@ export default {
       rescheduleTarget: null,
       rescheduleDate: "",
       rescheduleTimes: [],
-      timeSlotsMorning: ["8:00-8:40", "8:45-9:35", "10:25-11:05", "11:10-11:50"],
-      timeSlotsAfternoon: ["2:30-3:10", "3:15-3:55", "4:05-4:45", "4:50-5:30", "7:00-7:40", "7:45-8:25"],
+      timeSlotsMorning: ["08:00-08:40", "08:45-09:35", "10:25-11:05", "11:10-11:50"],
+      timeSlotsAfternoon: ["14:30-15:10", "15:15-15:55", "16:05-16:45", "16:50-17:30", "19:00-19:40", "19:45-20:25"],
       rules: {
         minDate: "",
         maxDate: "",
         minDaysAhead: 0,
         maxDaysAhead: 30,
         minTime: "08:00",
-        maxTime: "22:00"
+        maxTime: "22:00",
+        slots: [],
+        disabledDates: []
       }
     }
+  },
+  onLoad(options) {
+    const opts = options || {}
+    const status = normalizeStatusFilter(opts.status)
+    if (status !== "all") this.statusFilter = status
+    this.focusReservationId = toInt(opts.focusId)
   },
   computed: {
     loadMoreText() {
@@ -192,13 +218,17 @@ export default {
     this.fetchMore()
   },
   methods: {
+    isFocused(row) {
+      return Number((row && row.id) || 0) === this.focusReservationId
+    },
     initUser() {
       const s = uni.getStorageSync("session")
       this.user = s && s.username ? s.username : ""
     },
-    fetchReservationRules() {
+    fetchReservationRules(labName = "") {
+      const query = labName ? `?labName=${encodeURIComponent(labName)}` : ""
       uni.request({
-        url: `${BASE_URL}/reservation-rules`,
+        url: `${BASE_URL}/reservation-rules${query}`,
         method: "GET",
         success: (res) => {
           const payload = res.data || {}
@@ -210,8 +240,26 @@ export default {
           this.rules.maxDaysAhead = Number(data.maxDaysAhead || 30)
           this.rules.minTime = data.minTime || "08:00"
           this.rules.maxTime = data.maxTime || "22:00"
+          this.rules.slots = Array.isArray(data.slots) ? data.slots : []
+          this.rules.disabledDates = Array.isArray(data.disabledDates) ? data.disabledDates : []
+          this.applyRuleSlots(this.rules.slots)
+          this.rescheduleTimes = this.rescheduleTimes.filter((x) => this.rules.slots.includes(x))
         }
       })
+    },
+    applyRuleSlots(slotList) {
+      const list = Array.isArray(slotList) ? slotList : []
+      if (list.length === 0) return
+      const morning = []
+      const afternoon = []
+      list.forEach((slot) => {
+        const text = String(slot || "").trim()
+        const hour = Number((text.split("-")[0] || "0").split(":")[0] || 0)
+        if (Number.isFinite(hour) && hour < 12) morning.push(text)
+        else afternoon.push(text)
+      })
+      this.timeSlotsMorning = morning
+      this.timeSlotsAfternoon = afternoon
     },
     statusText(status) {
       if (status === "pending") return "待审批"
@@ -274,6 +322,7 @@ export default {
             this.total = payload.length
             this.hasMore = false
             this.page = 2
+            if (reset) this.scrollToFocusedRow()
             return
           }
 
@@ -290,6 +339,7 @@ export default {
           this.total = Number(meta.total || this.list.length)
           this.hasMore = !!meta.hasMore
           this.page = reqPage + 1
+          if (reset) this.scrollToFocusedRow()
         },
         fail: () => {
           if (reset) this.list = []
@@ -299,6 +349,15 @@ export default {
           this.loading = false
           this.loadingMore = false
         }
+      })
+    },
+    scrollToFocusedRow() {
+      if (!this.focusReservationId) return
+      this.$nextTick(() => {
+        uni.pageScrollTo({
+          selector: `#reservation-row-${this.focusReservationId}`,
+          duration: 220
+        })
       })
     },
     fetchMore() {
@@ -434,6 +493,7 @@ export default {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
+      this.fetchReservationRules(row && row.labName ? row.labName : "")
       this.showReschedule = true
     },
     closeReschedule() {
@@ -462,6 +522,10 @@ export default {
         uni.showToast({ title: "日期不在可预约范围", icon: "none" })
         return
       }
+      if (Array.isArray(this.rules.disabledDates) && this.rules.disabledDates.includes(this.rescheduleDate)) {
+        uni.showToast({ title: "该日期为停用日", icon: "none" })
+        return
+      }
 
       uni.showModal({
         title: "确认改期",
@@ -482,9 +546,11 @@ export default {
                 uni.showToast({ title: (res.data && res.data.msg) || "改期失败", icon: "none" })
                 return
               }
+              const status = String(((res.data.data || {}).status) || "pending")
+              const statusText = status === "approved" ? "已通过" : status === "pending" ? "待审批" : status
               uni.showModal({
                 title: "改期成功",
-                content: `预约 #${this.rescheduleTarget.id} 已更新，并重新进入待审批状态`,
+                content: `预约 #${this.rescheduleTarget.id} 已更新，当前状态：${statusText}`,
                 showCancel: false
               })
               this.showReschedule = false
@@ -563,6 +629,11 @@ export default {
 
 .reserveItem {
   border: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.reserveItem.focusItem {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.14);
 }
 
 .reserveName {

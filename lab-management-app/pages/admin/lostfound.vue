@@ -31,7 +31,13 @@
         </view>
       </view>
 
-      <view v-for="i in list" :key="i.id" class="card item">
+      <view
+        v-for="i in list"
+        :key="i.id"
+        class="card item"
+        :id="`admin-lost-item-${i.id}`"
+        :class="{ focusItem: isFocused(i) }"
+      >
         <view class="rowBetween">
           <view class="name">{{ i.title }}</view>
           <view class="tag" :class="i.type">{{ i.type === 'lost' ? '丢失' : '拾到' }}</view>
@@ -94,9 +100,23 @@
 <script>
 import { BASE_URL } from "@/common/api.js"
 
+function toInt(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.round(n) : 0
+}
+
+function normalizeClaimFilterFromNotice(rawStatus) {
+  const status = String(rawStatus || "").trim().toLowerCase()
+  if (status === "claim_pending") return "pending"
+  if (status === "claim_approved") return "approved"
+  if (status === "claim_rejected") return "rejected"
+  return "all"
+}
+
 export default {
   data() {
     return {
+      focusItemId: 0,
       list: [],
       filterStatus: "all",
       filterType: "all",
@@ -109,6 +129,12 @@ export default {
       }
     }
   },
+  onLoad(options) {
+    const opts = options || {}
+    this.focusItemId = toInt(opts.focusId)
+    const claimFilter = normalizeClaimFilterFromNotice(opts.noticeStatus)
+    if (claimFilter !== "all") this.filterClaim = claimFilter
+  },
   onShow() {
     const s = uni.getStorageSync("session")
     if (!s || s.role !== "admin") {
@@ -120,6 +146,9 @@ export default {
     this.fetchList()
   },
   methods: {
+    isFocused(item) {
+      return Number((item && item.id) || 0) === this.focusItemId
+    },
     claimStatusText(s) {
       if (s === "pending") return "待审核"
       if (s === "approved") return "已通过"
@@ -150,8 +179,20 @@ export default {
       uni.request({
         url: `${BASE_URL}/lostfound${qs}`,
         method: "GET",
-        success: (res) => { this.list = res.data || [] },
+        success: (res) => {
+          this.list = res.data || []
+          this.scrollToFocusedItem()
+        },
         fail: () => uni.showToast({ title: "获取失败", icon: "none" })
+      })
+    },
+    scrollToFocusedItem() {
+      if (!this.focusItemId) return
+      this.$nextTick(() => {
+        uni.pageScrollTo({
+          selector: `#admin-lost-item-${this.focusItemId}`,
+          duration: 220
+        })
       })
     },
     approveClaim(i) {
@@ -286,6 +327,10 @@ export default {
   padding: 10px 12px;
 }
 .item { border: 1px solid rgba(31, 77, 143, 0.06); }
+.item.focusItem {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.14);
+}
 .name { font-weight: 600; }
 .meta { margin-top: 6px; color:#64748b; font-size:12px; }
 .thumb {
