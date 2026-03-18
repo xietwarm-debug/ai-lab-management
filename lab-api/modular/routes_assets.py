@@ -870,6 +870,9 @@ def _format_borrow_request_row(row):
         out["daysToReturn"] = None
     else:
         out["daysToReturn"] = int((expected_dt.date() - now_dt.date()).days)
+    approval_policy = resolve_borrow_approval_policy(out)
+    out["secondaryConfirmRequired"] = bool(approval_policy.get("secondaryConfirmRequired"))
+    out["secondaryConfirmReasons"] = approval_policy.get("secondaryConfirmReasons") or []
     return out
 
 
@@ -1668,13 +1671,15 @@ def cancel_borrow_request(bid):
 
 
 @app.post("/borrow-requests/<int:bid>/approve")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def approve_borrow_request(bid):
     actor = g.current_user or {}
     actor_name = str(actor.get("username") or "").strip()
     actor_role = str(actor.get("role") or "").strip()
     actor_id = _safe_int(actor.get("id"))
     now_text = _now_text()
+    payload = request.get_json(force=True) or {}
+    confirmed_secondary = _to_bool_flag(payload.get("confirmSecondary"))
 
     def _tx(cur):
         cur.execute(
@@ -1683,6 +1688,10 @@ def approve_borrow_request(bid):
                    equipment_id AS equipmentId,
                    applicant_user_name AS applicantUserName,
                    applicant_name AS applicantName,
+                   equipment_name AS equipmentName,
+                   equipment_asset_code AS equipmentAssetCode,
+                   equipment_lab_name AS equipmentLabName,
+                   risk_flag AS riskFlag,
                    borrow_start_at AS borrowStartAt,
                    expected_return_at AS expectedReturnAt,
                    status
@@ -1698,6 +1707,9 @@ def approve_borrow_request(bid):
             raise BizError("borrow request not found", 404)
         if str(req.get("status") or "").strip() != "pending":
             raise BizError("invalid status", 409)
+        approval_policy = resolve_borrow_approval_policy(req)
+        if bool(approval_policy.get("secondaryConfirmRequired")) and not confirmed_secondary:
+            raise BizError("secondary confirmation required", 409)
 
         equipment_id = int(req.get("equipmentId") or 0)
         if equipment_id <= 0:
@@ -1790,7 +1802,7 @@ def approve_borrow_request(bid):
 
 
 @app.post("/borrow-requests/<int:bid>/reject")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def reject_borrow_request(bid):
     payload = request.get_json(force=True) or {}
     reject_reason = _normalize_text(payload.get("rejectReason"), "rejectReason", 255)
@@ -1838,7 +1850,7 @@ def reject_borrow_request(bid):
 
 
 @app.post("/borrow-requests/<int:bid>/note")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def add_borrow_request_note(bid):
     payload = request.get_json(force=True) or {}
     note = _normalize_text(payload.get("note"), "note", 255)
@@ -1865,7 +1877,7 @@ def add_borrow_request_note(bid):
 
 
 @app.post("/borrow-requests/<int:bid>/remind")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def remind_borrow_request(bid):
     payload = request.get_json(force=True) or {}
     remind_message = _normalize_text(payload.get("message"), "message", 255)
@@ -1948,7 +1960,7 @@ def remind_borrow_request(bid):
 
 
 @app.post("/borrow-requests/<int:bid>/mark-returned")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def mark_borrow_request_returned(bid):
     payload = request.get_json(force=True) or {}
     note = _normalize_text(payload.get("note"), "note", 255)
@@ -2117,7 +2129,7 @@ def list_borrow_extension_requests():
 
 
 @app.post("/borrow-requests/extensions/<int:extension_id>/approve")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def approve_borrow_extension_request(extension_id):
     actor = g.current_user or {}
     now_text = _now_text()
@@ -2174,7 +2186,7 @@ def approve_borrow_extension_request(extension_id):
 
 
 @app.post("/borrow-requests/extensions/<int:extension_id>/reject")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def reject_borrow_extension_request(extension_id):
     payload = request.get_json(force=True) or {}
     reject_reason = _normalize_text(payload.get("rejectReason"), "rejectReason", 255)
@@ -2206,7 +2218,7 @@ def reject_borrow_extension_request(extension_id):
 
 
 @app.post("/borrow-requests/<int:bid>/ai-remind")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def ai_remind_borrow_request(bid):
     actor = g.current_user or {}
     rows = query(
@@ -2245,7 +2257,7 @@ def ai_remind_borrow_request(bid):
 
 
 @app.post("/borrow-requests/scan-return")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def scan_return_borrow_request():
     payload = request.get_json(force=True) or {}
     token = _normalize_text(payload.get("token"), "token", 128)
@@ -2365,7 +2377,7 @@ def list_borrow_compensations():
 
 
 @app.post("/borrow-requests/<int:bid>/compensations")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def create_borrow_compensation(bid):
     payload = request.get_json(force=True) or {}
     damage_level = _normalize_text(payload.get("damageLevel"), "damageLevel", 32) or "normal"
@@ -2418,7 +2430,7 @@ def create_borrow_compensation(bid):
 
 
 @app.post("/borrow-compensations/<int:compensation_id>/status")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def update_borrow_compensation_status(compensation_id):
     payload = request.get_json(force=True) or {}
     status = _normalize_text(payload.get("status"), "status", 16)
@@ -2507,7 +2519,7 @@ def list_pcs_status():
 
 
 @app.post("/equipments")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def create_equipment():
     payload = _normalize_equipment_payload(request.get_json(force=True) or {})
     payload["allowBorrow"] = _resolve_allow_borrow_flag(payload)
@@ -2545,7 +2557,7 @@ def create_equipment():
 
 
 @app.post("/equipments/<int:eid>")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def update_equipment(eid):
     existing = _find_equipment_or_raise(eid)
     payload = _normalize_equipment_payload(request.get_json(force=True) or {})
@@ -2597,7 +2609,7 @@ def update_equipment(eid):
 
 
 @app.post("/equipments/<int:eid>/delete")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def delete_equipment(eid):
     def _tx(cur):
         cur.execute(
@@ -2692,7 +2704,7 @@ def create_equipment_event(eid):
 
     current_user = g.current_user or {}
     current_role = str(current_user.get("role") or "").strip()
-    if current_role != "admin" and event_type not in EQUIPMENT_EVENT_USER_ALLOWED:
+    if current_role != "admin" and not has_user_permission(current_user, PERMISSION_ASSET_MANAGER) and event_type not in EQUIPMENT_EVENT_USER_ALLOWED:
         raise BizError("forbidden", 403)
 
     note = str(payload.get("note") or "").strip()
@@ -2930,7 +2942,7 @@ def _ensure_equipment_qr_token(eid):
 
 
 @app.post("/equipments/<int:eid>/scrap")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def scrap_equipment(eid):
     payload = request.get_json(force=True) or {}
     reason = _normalize_text(payload.get("reason"), "reason", 255)
@@ -3162,7 +3174,7 @@ def return_equipment(eid):
 
 
 @app.post("/equipments/<int:eid>/transfer")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def transfer_equipment(eid):
     payload = request.get_json(force=True) or {}
     to_lab_id = _to_int_or_none(payload.get("toLabId"))
@@ -3245,7 +3257,7 @@ def transfer_equipment(eid):
 
 
 @app.post("/equipments/<int:eid>/maintenance-plan")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def update_equipment_maintenance_plan(eid):
     _find_equipment_or_raise(eid)
     payload = request.get_json(force=True) or {}
@@ -3338,7 +3350,7 @@ def update_equipment_maintenance_plan(eid):
 
 
 @app.get("/equipments/maintenance/due")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def list_due_maintenance_equipments():
     days_raw = request.args.get("days", "30")
     days = _to_int_or_none(days_raw)
@@ -3396,7 +3408,7 @@ def list_due_maintenance_equipments():
 
 
 @app.get("/equipments/<int:eid>/code")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def get_equipment_code_payload(eid):
     equipment = _find_equipment_or_raise(eid)
     token = _ensure_equipment_qr_token(eid)
@@ -4587,7 +4599,7 @@ def repair_order_ai_diagnose():
 
 
 @app.post("/equipments/import")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_ASSET_MANAGER])
 def import_equipments_csv():
     if "file" not in request.files:
         raise BizError("file required", 400)

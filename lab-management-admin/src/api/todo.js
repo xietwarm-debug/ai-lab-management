@@ -7,7 +7,3 @@ export function getTodoCenter(params = {}) {
 export function reviewLostFoundClaim(id, payload = {}) {
   return request.post(`/lostfound/${id}/claim-review`, payload)
 }
-
-export function notifyMissingCourseTask(courseId, taskId) {
-  return request.post(`/teacher/courses/${courseId}/tasks/${taskId}/notify-missing`, {})
-}

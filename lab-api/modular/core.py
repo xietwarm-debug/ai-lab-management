@@ -158,6 +158,16 @@ AI_PERMISSION_CODE_SET = {
     AI_PERMISSION_RESERVATION_CHECK_OCCUPANCY,
     AI_PERMISSION_RESERVATION_VIEW_OWNER,
 }
+PERMISSION_DUTY_OPERATOR = "duty.operator"
+PERMISSION_ASSET_MANAGER = "asset.manager"
+PERMISSION_SCHEDULE_MANAGER = "schedule.manager"
+PERMISSION_AUDIT_VIEWER = "audit.viewer"
+GENERAL_PERMISSION_CODE_SET = {
+    PERMISSION_DUTY_OPERATOR,
+    PERMISSION_ASSET_MANAGER,
+    PERMISSION_SCHEDULE_MANAGER,
+    PERMISSION_AUDIT_VIEWER,
+}
 RESERVATION_PRIVATE_VIEW_ROLE_SET = {"admin"}
 RESERVATION_ACTIVE_STATUS_SET = {"pending", "approved"}
 AGENT_TOOL_WHITELIST = {
@@ -607,6 +617,128 @@ def ensure_ai_user_permission_table():
                     UNIQUE KEY uk_ai_user_permission_user_code (user_id, permission_code),
                     INDEX idx_ai_user_permission_username (username),
                     INDEX idx_ai_user_permission_code_expires (permission_code, expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_user_permission_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_permission (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    user_id BIGINT NOT NULL DEFAULT 0,
+                    username VARCHAR(64) NOT NULL DEFAULT '',
+                    permission_code VARCHAR(128) NOT NULL DEFAULT '',
+                    granted_by BIGINT NULL,
+                    granted_by_name VARCHAR(64) NOT NULL DEFAULT '',
+                    expires_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_user_permission_user_code (user_id, permission_code),
+                    INDEX idx_user_permission_username (username),
+                    INDEX idx_user_permission_code_expires (permission_code, expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_duty_roster_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS duty_roster (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    duty_date DATE NOT NULL,
+                    shift_name VARCHAR(32) NOT NULL DEFAULT '',
+                    assignee_name VARCHAR(64) NOT NULL DEFAULT '',
+                    assignee_phone VARCHAR(32) NOT NULL DEFAULT '',
+                    backup_name VARCHAR(64) NOT NULL DEFAULT '',
+                    backup_phone VARCHAR(32) NOT NULL DEFAULT '',
+                    status VARCHAR(16) NOT NULL DEFAULT 'scheduled',
+                    note VARCHAR(255) NOT NULL DEFAULT '',
+                    created_by VARCHAR(64) NOT NULL DEFAULT '',
+                    updated_by VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_duty_roster_date (duty_date),
+                    INDEX idx_duty_roster_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_emergency_contact_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS emergency_contact (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    name VARCHAR(64) NOT NULL DEFAULT '',
+                    role_name VARCHAR(64) NOT NULL DEFAULT '',
+                    phone VARCHAR(32) NOT NULL DEFAULT '',
+                    priority_no INT NOT NULL DEFAULT 100,
+                    status VARCHAR(16) NOT NULL DEFAULT 'active',
+                    description VARCHAR(255) NOT NULL DEFAULT '',
+                    created_by VARCHAR(64) NOT NULL DEFAULT '',
+                    updated_by VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_emergency_contact_status (status),
+                    INDEX idx_emergency_contact_priority (priority_no)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_incident_record_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS incident_record (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    incident_no VARCHAR(32) NOT NULL DEFAULT '',
+                    lab_id BIGINT NULL,
+                    lab_name VARCHAR(128) NOT NULL DEFAULT '',
+                    title VARCHAR(120) NOT NULL DEFAULT '',
+                    incident_level VARCHAR(16) NOT NULL DEFAULT 'medium',
+                    status VARCHAR(16) NOT NULL DEFAULT 'reported',
+                    reporter_name VARCHAR(64) NOT NULL DEFAULT '',
+                    reporter_phone VARCHAR(32) NOT NULL DEFAULT '',
+                    emergency_contact_name VARCHAR(64) NOT NULL DEFAULT '',
+                    description TEXT NULL,
+                    disposal_note TEXT NULL,
+                    closed_at DATETIME NULL,
+                    created_by VARCHAR(64) NOT NULL DEFAULT '',
+                    updated_by VARCHAR(64) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_incident_record_no (incident_no),
+                    INDEX idx_incident_record_status (status),
+                    INDEX idx_incident_record_level (incident_level),
+                    INDEX idx_incident_record_lab (lab_id),
+                    INDEX idx_incident_record_created_at (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
@@ -4135,7 +4267,7 @@ def is_refresh_token_valid(row):
     return exp_dt > datetime.now()
 
 
-def auth_required(roles=None):
+def auth_required(roles=None, permissions=None, require_all_permissions=False):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -4170,7 +4302,20 @@ def auth_required(roles=None):
                 return jsonify({"ok": False, "msg": "account disabled"}), 403
             if int(current_user.get("isFrozen") or 0) == 1:
                 return jsonify({"ok": False, "msg": "account frozen"}), 403
-            if roles and current_user["role"] not in roles:
+            role_allowed = bool(not roles or current_user["role"] in roles)
+            permission_items = [str(item or "").strip() for item in (permissions or []) if str(item or "").strip()]
+            current_user["permissions"] = list_effective_user_permissions(current_user) if permission_items else []
+            permission_allowed = True
+            if permission_items:
+                checks = [has_user_permission(current_user, code) for code in permission_items]
+                permission_allowed = all(checks) if require_all_permissions else any(checks)
+            if roles and permission_items:
+                if not (role_allowed or permission_allowed):
+                    return jsonify({"ok": False, "msg": "forbidden"}), 403
+            elif roles:
+                if not role_allowed:
+                    return jsonify({"ok": False, "msg": "forbidden"}), 403
+            elif permission_items and not permission_allowed:
                 return jsonify({"ok": False, "msg": "forbidden"}), 403
             g.current_user = current_user
             return fn(*args, **kwargs)
@@ -4668,6 +4813,45 @@ def _default_reservation_rule_scope():
     }
 
 
+def _normalize_rule_name_list(value):
+    if not isinstance(value, list):
+        return []
+    seen = set()
+    items = []
+    for raw in value:
+        text = re.sub(r"\s+", " ", str(raw or "").strip())
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        items.append(text[:120])
+    return items
+
+
+def _default_borrow_approval_config():
+    return {
+        "requireSecondaryConfirm": False,
+        "riskFlagForceSecondaryConfirm": True,
+        "overdueHistoryForceSecondaryConfirm": True,
+        "labNames": [],
+        "assetKeywords": [],
+    }
+
+
+def _normalize_borrow_approval_config(raw_config, base=None):
+    source = raw_config if isinstance(raw_config, dict) else {}
+    fallback = base if isinstance(base, dict) else _default_borrow_approval_config()
+    return {
+        "requireSecondaryConfirm": bool(_normalize_bool(source.get("requireSecondaryConfirm", fallback.get("requireSecondaryConfirm")), fallback.get("requireSecondaryConfirm"))),
+        "riskFlagForceSecondaryConfirm": bool(_normalize_bool(source.get("riskFlagForceSecondaryConfirm", fallback.get("riskFlagForceSecondaryConfirm")), fallback.get("riskFlagForceSecondaryConfirm"))),
+        "overdueHistoryForceSecondaryConfirm": bool(
+            _normalize_bool(source.get("overdueHistoryForceSecondaryConfirm", fallback.get("overdueHistoryForceSecondaryConfirm")), fallback.get("overdueHistoryForceSecondaryConfirm"))
+        ),
+        "labNames": _normalize_rule_name_list(source.get("labNames", fallback.get("labNames"))),
+        "assetKeywords": _normalize_rule_name_list(source.get("assetKeywords", fallback.get("assetKeywords"))),
+    }
+
+
 def _merge_reservation_rule_scope(raw_scope, fallback_scope):
     base = _json_clone(fallback_scope if isinstance(fallback_scope, dict) else _default_reservation_rule_scope(), {})
     incoming = raw_scope if isinstance(raw_scope, dict) else {}
@@ -4736,6 +4920,7 @@ def _merge_reservation_rule_scope(raw_scope, fallback_scope):
 def _normalize_reservation_rule_config(raw_config):
     raw = raw_config if isinstance(raw_config, dict) else {}
     default_scope = _default_reservation_rule_scope()
+    borrow_approval = _normalize_borrow_approval_config(raw.get("borrowApproval"), raw.get("borrowApproval"))
 
     raw_global = raw.get("global") if isinstance(raw.get("global"), dict) else {}
     legacy_keys = {
@@ -4783,6 +4968,7 @@ def _normalize_reservation_rule_config(raw_config):
         "version": 1,
         "global": global_scope,
         "labRules": lab_rules,
+        "borrowApproval": borrow_approval,
     }
 
 
@@ -4928,6 +5114,69 @@ def resolve_reservation_review_policy(lab_id=None, lab_name="", date_text="", ti
         "reviewPolicy": review_policy,
         "approvalRequired": True,
         "isPeakSlot": bool(is_peak_hit),
+    }
+
+
+def resolve_borrow_approval_policy(request_row):
+    config_payload = get_reservation_rule_config(force_refresh=False)
+    config = _normalize_borrow_approval_config(config_payload.get("borrowApproval"))
+    item = request_row if isinstance(request_row, dict) else {}
+
+    reasons = []
+    if bool(config.get("requireSecondaryConfirm")):
+        reasons.append("global")
+    if bool(config.get("riskFlagForceSecondaryConfirm")) and int(item.get("riskFlag") or 0) == 1:
+        reasons.append("risk_flag")
+
+    applicant_user_name = str(item.get("applicantUserName") or "").strip()
+    if bool(config.get("overdueHistoryForceSecondaryConfirm")) and applicant_user_name:
+        overdue_rows = query(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM equipment_borrow_request
+            WHERE applicant_user_name=%s
+              AND (
+                  (status='approved' AND returned_at IS NULL AND expected_return_at IS NOT NULL AND expected_return_at < NOW())
+                  OR
+                  (status='returned' AND returned_at IS NOT NULL AND expected_return_at IS NOT NULL AND returned_at > expected_return_at)
+              )
+            """,
+            (applicant_user_name,),
+        )
+        overdue_count = int((overdue_rows[0] or {}).get("cnt") or 0) if overdue_rows else 0
+        if overdue_count > 0:
+            reasons.append("overdue_history")
+
+    lab_name = str(item.get("equipmentLabName") or "").strip().lower()
+    for rule_name in config.get("labNames") or []:
+        candidate = str(rule_name or "").strip().lower()
+        if candidate and candidate == lab_name:
+            reasons.append(f"lab:{rule_name}")
+            break
+
+    asset_text = " ".join(
+        [
+            str(item.get("equipmentName") or "").strip(),
+            str(item.get("equipmentAssetCode") or "").strip(),
+        ]
+    ).lower()
+    for keyword in config.get("assetKeywords") or []:
+        candidate = str(keyword or "").strip().lower()
+        if candidate and candidate in asset_text:
+            reasons.append(f"asset:{keyword}")
+            break
+
+    unique_reasons = []
+    seen = set()
+    for reason in reasons:
+        if reason in seen:
+            continue
+        seen.add(reason)
+        unique_reasons.append(reason)
+    return {
+        "secondaryConfirmRequired": bool(unique_reasons),
+        "secondaryConfirmReasons": unique_reasons,
+        "config": config,
     }
 
 
@@ -5197,6 +5446,7 @@ def get_reservation_rules_admin_payload():
     return {
         "global": _json_clone(config_payload.get("global") if isinstance(config_payload.get("global"), dict) else {}, {}),
         "labRules": _json_clone(config_payload.get("labRules") if isinstance(config_payload.get("labRules"), list) else [], []),
+        "borrowApproval": _normalize_borrow_approval_config(config_payload.get("borrowApproval")),
         "labs": lab_options,
     }
 
@@ -5425,6 +5675,79 @@ def list_user_ai_permission_statuses(target_user):
     items = []
     for code in sorted(AI_PERMISSION_CODE_SET):
         items.append(get_ai_permission_status(actor, code))
+    return items
+
+
+def _normalize_general_permission_code(value):
+    code = str(value or "").strip()
+    if code not in GENERAL_PERMISSION_CODE_SET:
+        raise BizError("invalid permissionCode", 400)
+    return code
+
+
+def get_user_permission_status(current_user, permission_code):
+    code = _normalize_general_permission_code(permission_code)
+    actor = current_user or {}
+    role = str(actor.get("role") or "").strip().lower()
+    user_id = _to_int_or_none(actor.get("id"))
+    username = str(actor.get("username") or "").strip()
+
+    base = {
+        "permissionCode": code,
+        "granted": False,
+        "source": "none",
+        "expiresAt": "",
+    }
+    if role == "admin":
+        base["granted"] = True
+        base["source"] = "role_default"
+        return base
+    if not user_id or not username:
+        return base
+
+    rows = query(
+        """
+        SELECT permission_code AS permissionCode, expires_at AS expiresAt
+        FROM user_permission
+        WHERE user_id=%s
+          AND permission_code=%s
+        LIMIT 1
+        """,
+        (user_id, code),
+    )
+    if not rows:
+        return base
+
+    row = rows[0] or {}
+    base["expiresAt"] = _to_text_time(row.get("expiresAt"))
+    expires_dt = _to_datetime(row.get("expiresAt"))
+    if expires_dt != datetime.min and expires_dt <= datetime.now():
+        base["source"] = "expired"
+        return base
+
+    base["granted"] = True
+    base["source"] = "user_grant"
+    return base
+
+
+def has_user_permission(current_user, permission_code):
+    return bool(get_user_permission_status(current_user, permission_code).get("granted"))
+
+
+def list_user_permission_statuses(target_user):
+    actor = target_user or {}
+    items = []
+    for code in sorted(GENERAL_PERMISSION_CODE_SET):
+        items.append(get_user_permission_status(actor, code))
+    return items
+
+
+def list_effective_user_permissions(current_user):
+    actor = current_user or {}
+    items = []
+    for code in sorted(GENERAL_PERMISSION_CODE_SET):
+        if has_user_permission(actor, code):
+            items.append(code)
     return items
 
 
@@ -11120,6 +11443,11 @@ except Exception as e:
     print(f"[warn] ensure_ai_user_permission_table failed: {e}")
 
 try:
+    ensure_user_permission_table()
+except Exception as e:
+    print(f"[warn] ensure_user_permission_table failed: {e}")
+
+try:
     ensure_announcement_table()
 except Exception as e:
     print(f"[warn] ensure_announcement_table failed: {e}")
@@ -11158,6 +11486,21 @@ try:
     ensure_assets_tables()
 except Exception as e:
     print(f"[warn] ensure_assets_tables failed: {e}")
+
+try:
+    ensure_duty_roster_table()
+except Exception as e:
+    print(f"[warn] ensure_duty_roster_table failed: {e}")
+
+try:
+    ensure_emergency_contact_table()
+except Exception as e:
+    print(f"[warn] ensure_emergency_contact_table failed: {e}")
+
+try:
+    ensure_incident_record_table()
+except Exception as e:
+    print(f"[warn] ensure_incident_record_table failed: {e}")
 
 try:
     ensure_equipment_borrow_tables()

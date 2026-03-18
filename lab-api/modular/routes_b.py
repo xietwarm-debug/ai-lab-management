@@ -222,6 +222,7 @@ def list_lost_found():
     status = request.args.get("status", "").strip()
     item_type = request.args.get("type", "").strip()
     owner = request.args.get("owner", "").strip()
+    keyword = request.args.get("keyword", "").strip()
     student_id = request.args.get("studentId", "").strip()
     student_name = request.args.get("studentName", "").strip()
     student_class = request.args.get("studentClass", "").strip()
@@ -259,6 +260,25 @@ def list_lost_found():
     if owner:
         sql += " AND owner=%s"
         params.append(owner)
+    if keyword:
+        sql += """
+            AND (
+                title LIKE %s
+                OR description LIKE %s
+                OR location LIKE %s
+                OR contact LIKE %s
+                OR owner LIKE %s
+                OR claim_student_id LIKE %s
+                OR claim_name LIKE %s
+                OR claim_class LIKE %s
+                OR claim_apply_user LIKE %s
+                OR claim_apply_student_id LIKE %s
+                OR claim_apply_name LIKE %s
+                OR claim_apply_class LIKE %s
+            )
+        """
+        kw = f"%{keyword}%"
+        params.extend([kw] * 12)
     if student_id:
         sql += " AND claim_student_id LIKE %s"
         params.append(f"%{student_id}%")
@@ -712,10 +732,38 @@ def update_lost_found_status(lid):
             claim_student_id=%s,
             claim_name=%s,
             claim_class=%s,
+            claim_apply_status=CASE WHEN %s='open' THEN '' ELSE claim_apply_status END,
+            claim_apply_user=CASE WHEN %s='open' THEN '' ELSE claim_apply_user END,
+            claim_apply_reason=CASE WHEN %s='open' THEN '' ELSE claim_apply_reason END,
+            claim_apply_student_id=CASE WHEN %s='open' THEN '' ELSE claim_apply_student_id END,
+            claim_apply_name=CASE WHEN %s='open' THEN '' ELSE claim_apply_name END,
+            claim_apply_class=CASE WHEN %s='open' THEN '' ELSE claim_apply_class END,
+            claim_apply_at=CASE WHEN %s='open' THEN NULL ELSE claim_apply_at END,
+            claim_reviewed_by=CASE WHEN %s='open' THEN '' ELSE claim_reviewed_by END,
+            claim_reviewed_at=CASE WHEN %s='open' THEN NULL ELSE claim_reviewed_at END,
+            claim_review_note=CASE WHEN %s='open' THEN '' ELSE claim_review_note END,
             created_at=CASE WHEN %s='closed' THEN %s ELSE created_at END
         WHERE id=%s
         """,
-        (status, claim_student_id, claim_name, claim_class, status, status_time, lid),
+        (
+            status,
+            claim_student_id,
+            claim_name,
+            claim_class,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status,
+            status_time,
+            lid,
+        ),
     )
     audit_log(
         "admin.lostfound.status",
@@ -819,7 +867,7 @@ def get_lab_sensor_status():
 
 
 @app.post("/labs/<int:lid>")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER, PERMISSION_ASSET_MANAGER])
 def update_lab(lid):
     data = request.get_json(force=True) or {}
     name = (data.get("name") or "").strip()
@@ -870,7 +918,7 @@ def update_lab(lid):
 
 
 @app.post("/labs")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER, PERMISSION_ASSET_MANAGER])
 def create_lab():
     data = request.get_json(force=True) or {}
     name = (data.get("name") or "").strip()
@@ -920,7 +968,7 @@ def create_lab():
 
 
 @app.post("/labs/<int:lid>/delete")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER, PERMISSION_ASSET_MANAGER])
 def delete_lab(lid):
     row = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lid,))
     if not row:

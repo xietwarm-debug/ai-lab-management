@@ -1,64 +1,81 @@
 <template>
-  <div class="notify-page">
-    <section class="hero-card">
-      <div class="hero-copy">
-        <span class="eyebrow">统一消息流</span>
-        <h2>通知中心</h2>
-        <p>把公告、借用提醒、预约审批、门禁提醒和异常预警汇总到一处，支持已读未读、类型筛选和批量处理。</p>
-        <div class="hero-meta">
-          <span>总消息 {{ allItems.length }}</span>
-          <span>未读 {{ unreadTotal }}</span>
-          <span>最近刷新 {{ lastUpdated || '-' }}</span>
+  <div class="page-container">
+    <!-- 顶部概览与控制区 -->
+    <div class="overview-section">
+      <div class="header-row">
+        <div class="title-area">
+          <span class="eyebrow">统一消息流</span>
+          <h1 class="page-title">通知中心</h1>
+          <p class="page-desc">
+            把公告、借用提醒、预约审批、门禁提醒和异常预警汇总到一处，支持已读未读、类型筛选和批量处理。
+            <span class="update-time">最近刷新 {{ lastUpdated || '-' }}</span>
+          </p>
         </div>
-      </div>
-      <div class="hero-actions">
-        <el-button @click="markShownAsRead" :disabled="!filteredItems.length">标记当前已读</el-button>
-        <el-button type="primary" :loading="loading" @click="fetchAll">刷新消息流</el-button>
-      </div>
-    </section>
-
-    <section class="metric-grid">
-      <article class="metric-card" v-for="item in metricCards" :key="item.key">
-        <span class="metric-label">{{ item.label }}</span>
-        <strong class="metric-value">{{ item.value }}</strong>
-        <span class="metric-sub">{{ item.sub }}</span>
-      </article>
-    </section>
-
-    <section class="panel-card">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-radio-group v-model="typeFilter">
-            <el-radio-button v-for="item in typeOptions" :key="item.value" :label="item.value">
-              {{ item.label }}
-            </el-radio-button>
-          </el-radio-group>
-          <el-radio-group v-model="readFilter">
-            <el-radio-button label="all">全部</el-radio-button>
-            <el-radio-button label="unread">未读</el-radio-button>
-            <el-radio-button label="read">已读</el-radio-button>
-          </el-radio-group>
-        </div>
-        <div class="toolbar-right">
-          <el-input
-            v-model="keyword"
-            placeholder="搜索标题、消息内容、实验室或申请人"
-            clearable
-            style="width: 320px"
-          />
+        <div class="action-area">
+          <el-button @click="markShownAsRead" :disabled="!filteredItems.length" :icon="Check">标记当前已读</el-button>
+          <el-button type="primary" :loading="loading" @click="fetchAll" :icon="RefreshRight">刷新消息流</el-button>
         </div>
       </div>
 
-      <div class="batch-bar">
-        <span>已选 {{ selectedIds.length }} 条</span>
-        <el-button size="small" @click="toggleSelectAll">
+      <!-- 数据指标卡片网格 -->
+      <div class="stats-grid">
+        <div 
+          v-for="item in metricCards" 
+          :key="item.key" 
+          class="stat-card"
+          :class="[`is-${item.colorType}`, { 'has-unread': item.unread > 0 }]"
+        >
+          <div class="stat-info">
+            <span class="stat-label">{{ item.label }}</span>
+            <span v-if="item.unread > 0" class="unread-badge">未读 {{ item.unread }}</span>
+          </div>
+          <div class="stat-value">{{ item.value }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 列表控制栏 -->
+    <div class="control-bar">
+      <div class="filter-group">
+        <el-radio-group v-model="typeFilter" size="large" class="custom-radio">
+          <el-radio-button v-for="item in typeOptions" :key="item.value" :label="item.value">
+            {{ item.label }}
+          </el-radio-button>
+        </el-radio-group>
+
+        <el-divider direction="vertical" />
+
+        <el-radio-group v-model="readFilter" size="large" class="custom-radio light-radio">
+          <el-radio-button label="all">全部</el-radio-button>
+          <el-radio-button label="unread">未读</el-radio-button>
+          <el-radio-button label="read">已读</el-radio-button>
+        </el-radio-group>
+      </div>
+
+      <div class="search-group">
+        <el-input
+          v-model="keyword"
+          placeholder="搜索标题、消息内容、实验室或申请人"
+          :prefix-icon="Search"
+          clearable
+          class="custom-search"
+        />
+      </div>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div class="batch-bar">
+      <span class="select-info">已选 <strong>{{ selectedIds.length }}</strong> 条</span>
+      <div class="batch-actions">
+        <el-button link @click="toggleSelectAll">
           {{ isAllShownSelected ? '取消全选' : '全选当前列表' }}
         </el-button>
-        <el-button size="small" @click="markBatch(true)" :disabled="!selectedIds.length">批量已读</el-button>
-        <el-button size="small" @click="markBatch(false)" :disabled="!selectedIds.length">批量未读</el-button>
+        <el-button link @click="markBatch(true)" :disabled="!selectedIds.length">批量已读</el-button>
+        <el-button link @click="markBatch(false)" :disabled="!selectedIds.length">批量未读</el-button>
         <el-button
           size="small"
           type="primary"
+          plain
           :loading="batchProcessing"
           :disabled="!selectedProcessableCount"
           @click="processSelected"
@@ -66,40 +83,46 @@
           批量处理 {{ selectedProcessableCount }} 条
         </el-button>
       </div>
+    </div>
 
-      <div v-if="filteredItems.length" class="stream-list">
-        <article
-          v-for="item in filteredItems"
-          :key="item.id"
-          class="stream-item"
-          :class="{ unread: !isRead(item), active: isSelected(item.id) }"
-        >
-          <div class="stream-head">
-            <div class="stream-main">
-              <el-checkbox :model-value="isSelected(item.id)" @change="toggleSelect(item.id)" />
-              <div>
-                <div class="title-row">
-                  <el-tag size="small" :type="item.tagType">{{ item.typeLabel }}</el-tag>
-                  <strong>{{ item.title }}</strong>
-                  <span v-if="!isRead(item)" class="unread-dot">未读</span>
-                </div>
-                <p class="subtitle">{{ item.subtitle }}</p>
-              </div>
+    <!-- 消息列表区 -->
+    <transition-group name="list" tag="div" class="message-list" v-if="filteredItems.length">
+      <div 
+        v-for="item in filteredItems" 
+        :key="item.id" 
+        class="message-card"
+        :class="{ 'is-read': isRead(item), 'is-selected': isSelected(item.id) }"
+      >
+        <div class="card-left">
+          <el-checkbox class="msg-checkbox" :model-value="isSelected(item.id)" @change="toggleSelect(item.id)" />
+          <div class="msg-content">
+            <div class="msg-header">
+              <el-tag :type="item.tagType" size="small" effect="light" class="custom-tag">
+                {{ item.typeLabel }}
+              </el-tag>
+              <h3 class="msg-title">{{ item.title }}</h3>
+              <span v-if="!isRead(item)" class="status-dot"></span>
+              
+              <!-- 级别/状态 Badge -->
+              <span class="severity-badge" :class="`badge-${item.statusType}`">
+                {{ item.statusLabel }}
+              </span>
             </div>
-            <div class="stream-side">
-              <el-tag size="small" effect="plain" :type="item.statusType">{{ item.statusLabel }}</el-tag>
-              <span>{{ item.createdAt || '-' }}</span>
-            </div>
+            <p class="msg-desc">{{ item.subtitle }}</p>
+            <p class="msg-detail">{{ item.message }}</p>
           </div>
+        </div>
 
-          <p class="message">{{ item.message }}</p>
-
-          <div class="stream-actions">
-            <el-button text @click="goItem(item)">查看详情</el-button>
-            <el-button text @click="toggleRead(item)">{{ isRead(item) ? '标记未读' : '标记已读' }}</el-button>
+        <div class="card-right">
+          <div class="msg-time">{{ item.createdAt || '-' }}</div>
+          <div class="msg-actions">
+            <el-button link type="info" class="hover-btn" @click="goItem(item)">查看详情</el-button>
+            <el-button link type="primary" class="hover-btn" @click="toggleRead(item)">
+              {{ isRead(item) ? '标记未读' : '标记已读' }}
+            </el-button>
             <el-button
               v-if="item.processable"
-              text
+              link
               type="primary"
               :loading="processingIds[item.id]"
               @click="processItem(item)"
@@ -107,16 +130,25 @@
               {{ item.processLabel }}
             </el-button>
           </div>
-        </article>
+        </div>
       </div>
-      <el-empty v-else description="当前筛选条件下暂无消息" />
-    </section>
+    </transition-group>
+    
+    <transition name="fade">
+      <div v-if="!filteredItems.length" class="empty-state">
+        <el-empty description="当前筛选条件下暂无消息" />
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
+import { ref, reactive, computed, onMounted } from 'vue'
+import { Check, RefreshRight, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+
+// 假设这些是你实际项目中的 API 和 Store
 import { getAdminAnnouncements, updateAnnouncement } from '@/api/announcements'
 import { getAdminAiRiskAlerts } from '@/api/ai'
 import { approveBorrowRequest, getBorrowRequests, remindBorrowRequest } from '@/api/borrow'
@@ -172,23 +204,26 @@ const isAllShownSelected = computed(() => (
 const selectedItems = computed(() => allItems.value.filter((item) => selectedIds.value.includes(item.id)))
 const selectedProcessableCount = computed(() => selectedItems.value.filter((item) => item.processable).length)
 
+// 【UI优化】增强了 metricCards 数据结构，加入了 UI 颜色标识 colorType 和 unread 计数
 const metricCards = computed(() => {
-  const build = (type, label) => {
+  const build = (type, label, colorType) => {
     const rows = allItems.value.filter((item) => item.type === type)
+    const unreadCount = rows.filter((item) => !isRead(item)).length
     return {
       key: type,
       label,
       value: rows.length,
-      sub: `未读 ${rows.filter((item) => !isRead(item)).length}`
+      unread: unreadCount,
+      colorType: colorType
     }
   }
   return [
-    { key: 'all', label: '消息总量', value: allItems.value.length, sub: `未读 ${unreadTotal.value}` },
-    build('announcement', '公告消息'),
-    build('reservation', '预约审批'),
-    build('asset_borrow', '借用提醒'),
-    build('door_reminder', '门禁提醒'),
-    build('risk_alert', '异常预警')
+    { key: 'all', label: '消息总量', value: allItems.value.length, unread: unreadTotal.value, colorType: 'primary' },
+    build('announcement', '公告消息', 'info'),
+    build('reservation', '预约审批', 'info'),
+    build('asset_borrow', '借用提醒', 'warning'),
+    build('door_reminder', '门禁提醒', 'info'),
+    build('risk_alert', '异常预警', 'danger')
   ]
 })
 
@@ -229,9 +264,7 @@ function setRead(item, read) {
   if (read) {
     readState.value = {
       ...readState.value,
-      [item.id]: {
-        readAt: nowText()
-      }
+      [item.id]: { readAt: nowText() }
     }
   } else {
     const nextState = { ...readState.value }
@@ -279,6 +312,7 @@ function toggleRead(item) {
   setRead(item, !isRead(item))
 }
 
+// === 数据拼装逻辑保持原样 ===
 function toAnnouncementItem(row) {
   return {
     id: `announcement-${row.id}`,
@@ -411,8 +445,11 @@ async function fetchAll() {
       ...doorRows.filter((item) => item.doorStatus === 'pending').map(toDoorItem),
       ...riskRows.map((item, index) => toRiskItem(item, index))
     ].sort(compareDesc)
+    
     lastUpdated.value = nowText()
     selectedIds.value = selectedIds.value.filter((id) => allItems.value.some((item) => item.id === id))
+  } catch (error) {
+    console.error('Fetch error:', error)
   } finally {
     loading.value = false
   }
@@ -460,6 +497,8 @@ async function processItem(item) {
     setRead(item, true)
     if (message) ElMessage.success(message)
     await fetchAll()
+  } catch(e) {
+    ElMessage.error('处理失败')
   } finally {
     processingIds[item.id] = false
   }
@@ -499,190 +538,430 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-.notify-page {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+// 设计系统变量
+$bg-color: #f8fafc;
+$card-bg: #ffffff;
+$text-main: #0f172a;
+$text-regular: #475569;
+$text-light: #94a3b8;
+$border-color: #e2e8f0;
+$primary: #3b82f6;
+$danger: #ef4444;
+$warning: #f59e0b;
+$success: #10b981;
+$info: #64748b;
+$radius-lg: 16px;
+$radius-md: 8px;
+$shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.03);
+$shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
+
+// --- 核心入场动画 Keyframes ---
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.hero-card,
-.panel-card,
-.metric-card {
-  border: 1px solid var(--app-border);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at top right, rgba(15, 76, 129, 0.14), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
-  box-shadow: var(--app-shadow);
+.page-container {
+  padding: 32px;
+  background-color: $bg-color;
+  min-height: 100vh;
+  box-sizing: border-box;
 }
 
-.hero-card,
-.toolbar,
-.hero-meta,
-.batch-bar,
-.stream-head,
-.stream-actions {
+/* --- 顶部概览区 --- */
+.overview-section {
+  margin-bottom: 24px;
+  animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.header-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  align-items: flex-end; // 修改为底部对齐更好看
+  margin-bottom: 24px;
+
+  .eyebrow {
+    display: inline-block;
+    color: $primary;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+
+  .page-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: $text-main;
+    margin: 0 0 12px 0;
+  }
+
+  .page-desc {
+    color: $text-regular;
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.5;
+
+    .update-time {
+      color: $text-light;
+      margin-left: 16px;
+      font-size: 13px;
+      padding-left: 16px;
+      border-left: 1px solid $border-color;
+    }
+  }
 }
 
-.hero-card,
-.panel-card {
-  padding: 24px;
-}
-
-.hero-copy h2,
-.metric-value,
-.title-row strong {
-  margin: 0;
-}
-
-.hero-copy p,
-.subtitle,
-.message {
-  margin: 0;
-  color: var(--app-text-secondary);
-}
-
-.hero-meta,
-.batch-bar,
-.subtitle {
-  color: var(--app-text-tertiary);
-  flex-wrap: wrap;
-}
-
-.eyebrow {
-  display: inline-flex;
-  margin-bottom: 8px;
-  color: #0f4c81;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-}
-
-.metric-grid {
+/* --- 指标卡片 (悬浮美学) --- */
+.stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 16px;
 }
 
-.metric-card {
+.stat-card {
+  background: $card-bg;
+  border-radius: $radius-lg;
   padding: 20px;
-}
+  box-shadow: $shadow-soft;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
-.metric-label,
-.metric-sub {
-  display: block;
-}
-
-.metric-label {
-  color: var(--app-text-secondary);
-  font-size: 13px;
-}
-
-.metric-value {
-  display: block;
-  margin: 8px 0;
-  font-size: 32px;
-}
-
-.metric-sub {
-  color: var(--app-text-tertiary);
-  font-size: 13px;
-}
-
-.toolbar,
-.batch-bar {
-  flex-wrap: wrap;
-}
-
-.toolbar-left,
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.stream-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.stream-item {
-  padding: 18px;
-  border-radius: 22px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.76);
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.stream-item.unread {
-  border-color: rgba(15, 76, 129, 0.24);
-  box-shadow: 0 12px 28px rgba(15, 76, 129, 0.08);
-}
-
-.stream-item.active {
-  transform: translateY(-1px);
-  border-color: rgba(219, 39, 119, 0.26);
-}
-
-.stream-main,
-.title-row,
-.stream-side {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.stream-main {
-  align-items: flex-start;
-}
-
-.stream-side {
-  flex-direction: column;
-  align-items: flex-end;
-  color: var(--app-text-tertiary);
-  font-size: 13px;
-}
-
-.title-row {
-  flex-wrap: wrap;
-}
-
-.unread-dot {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(219, 39, 119, 0.1);
-  color: #be185d;
-  font-size: 12px;
-}
-
-.message {
-  margin: 14px 0 10px;
-  line-height: 1.7;
-}
-
-.stream-actions {
-  justify-content: flex-end;
-}
-
-@media (max-width: 960px) {
-  .hero-card,
-  .toolbar,
-  .stream-head {
-    flex-direction: column;
-    align-items: flex-start;
+  // 使用 SCSS 循环为指标卡片添加优雅的交错延迟 (Staggered Animation)
+  @for $i from 1 through 6 {
+    &:nth-child(#{$i}) {
+      animation-delay: #{$i * 0.05}s;
+    }
   }
 
-  .stream-side,
-  .stream-actions {
-    width: 100%;
-    align-items: flex-start;
-    justify-content: flex-start;
+  // 左侧彩色指示条
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  &.has-unread::before { opacity: 1; }
+  &.is-primary::before { background-color: $primary; }
+  &.is-danger::before { background-color: $danger; }
+  &.is-warning::before { background-color: $warning; }
+  &.is-info::before { background-color: $info; }
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: $shadow-hover;
+  }
+
+  .stat-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+
+    .stat-label {
+      font-size: 14px;
+      color: $text-regular;
+      font-weight: 500;
+    }
+
+    .unread-badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #f1f5f9;
+      color: $text-regular;
+    }
+  }
+
+  .stat-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: $text-main;
+    line-height: 1;
+    font-family: 'Inter', sans-serif;
+  }
+
+  // 特定颜色的未读 Badge 样式
+  &.is-danger .unread-badge { background: #fef2f2; color: $danger; }
+  &.is-warning .unread-badge { background: #fffbeb; color: $warning; }
+  &.is-primary .unread-badge { background: #eff6ff; color: $primary; }
+}
+
+/* --- 控制栏 --- */
+.control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: $card-bg;
+  padding: 16px 24px;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-soft;
+  margin-bottom: 16px;
+  animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both;
+
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+}
+
+// 药丸风格定制 Radio
+:deep(.custom-radio) {
+  .el-radio-button__inner {
+    border: none !important;
+    background: transparent;
+    color: $text-regular;
+    font-weight: 500;
+    border-radius: 6px !important;
+    padding: 8px 16px;
+    box-shadow: none !important;
+  }
+  
+  .el-radio-button__original-radio:checked + .el-radio-button__inner {
+    background-color: #eff6ff;
+    color: $primary;
+    box-shadow: none !important;
+  }
+
+  &.light-radio .el-radio-button__original-radio:checked + .el-radio-button__inner {
+    background-color: #f1f5f9;
+    color: $text-main;
+  }
+}
+
+:deep(.custom-search) {
+  width: 320px;
+  .el-input__wrapper {
+    box-shadow: 0 0 0 1px $border-color inset;
+    border-radius: 8px;
+    padding: 4px 12px;
+    &:hover, &.is-focus { box-shadow: 0 0 0 1px $primary inset; }
+  }
+}
+
+/* --- 批量操作栏 --- */
+.batch-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px 16px 8px;
+  flex-wrap: wrap;
+  animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.15s both;
+
+  .select-info {
+    font-size: 14px;
+    color: $text-regular;
+    strong { color: $primary; font-size: 16px; }
+  }
+
+  .batch-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+}
+
+/* --- 消息列表 --- */
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+}
+
+/* --- Vue Transition Group 丝滑过渡动画 --- */
+.list-move,
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateY(20px) scale(0.98);
+}
+
+.list-leave-active {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 0;
+}
+
+/* 缺省页动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.empty-state {
+  background: $card-bg;
+  border-radius: $radius-lg;
+  padding: 60px 0;
+  box-shadow: $shadow-soft;
+}
+
+.message-card {
+  background: $card-bg;
+  border-radius: $radius-lg;
+  padding: 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  box-shadow: $shadow-soft;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+
+  &:hover {
+    border-color: rgba(59, 130, 246, 0.1);
+    box-shadow: $shadow-hover;
+    .hover-btn { opacity: 1; visibility: visible; }
+  }
+
+  // 选中状态
+  &.is-selected {
+    border-color: rgba(59, 130, 246, 0.3);
+    background-color: #f8fafc;
+  }
+
+  // 已读状态
+  &.is-read {
+    opacity: 0.65;
+    .msg-title { color: $text-regular; font-weight: 500; }
+  }
+
+  .card-left {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+  }
+
+  .msg-checkbox {
+    margin-top: 2px;
+  }
+
+  .msg-content {
+    flex: 1;
+  }
+
+  .msg-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+
+    .msg-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: $text-main;
+      margin: 0;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: $danger;
+    }
+
+    .severity-badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid currentColor;
+      
+      &.badge-danger { color: $danger; background: #fef2f2; border-color: rgba(239, 68, 68, 0.2); }
+      &.badge-warning { color: $warning; background: #fffbeb; border-color: rgba(245, 158, 11, 0.2); }
+      &.badge-success { color: $success; background: #ecfdf5; border-color: rgba(16, 185, 129, 0.2); }
+      &.badge-info, &.badge-primary { color: $info; background: #f1f5f9; border-color: rgba(100, 116, 139, 0.2); }
+    }
+  }
+
+  .msg-desc {
+    color: $text-regular;
+    font-size: 13px;
+    margin: 0 0 8px 0;
+  }
+  
+  .msg-detail {
+    color: $text-main;
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .card-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+    min-width: 200px;
+
+    .msg-time {
+      font-size: 13px;
+      color: $text-light;
+    }
+
+    .msg-actions {
+      display: flex;
+      gap: 12px;
+
+      // 默认隐藏部分按钮，hover时显示
+      .hover-btn {
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.2s;
+      }
+    }
+  }
+}
+
+:deep(.custom-tag) {
+  border-radius: 6px;
+  font-weight: 500;
+  border: none;
+  &.el-tag--danger { background-color: #fef2f2; color: $danger; }
+  &.el-tag--warning { background-color: #fffbeb; color: $warning; }
+}
+
+// 响应式设计
+@media (max-width: 960px) {
+  .header-row { flex-direction: column; align-items: flex-start; gap: 16px; }
+  .message-card {
+    flex-direction: column;
+    .card-right {
+      width: 100%;
+      align-items: flex-start;
+      margin-top: 16px;
+      padding-left: 30px; // 与左侧复选框对齐
+      flex-direction: row;
+      justify-content: space-between;
+      
+      .hover-btn { opacity: 1; visibility: visible; }
+    }
   }
 }
 </style>

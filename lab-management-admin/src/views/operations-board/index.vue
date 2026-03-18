@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <section class="hero-card">
+    <section class="hero-card animate-up" style="--delay: 0.1s">
       <div class="hero-copy">
         <span class="eyebrow">运营总览</span>
         <h2>大屏运营看板</h2>
@@ -17,32 +17,32 @@
     </section>
 
     <section class="metric-grid">
-      <article class="metric-card">
+      <article class="metric-card animate-up" style="--delay: 0.1s">
         <span class="metric-label">今日预约</span>
         <strong class="metric-value">{{ overview.todayReservations || 0 }}</strong>
         <span class="metric-sub">当天提交与处理的预约总量</span>
       </article>
-      <article class="metric-card warn">
+      <article class="metric-card warn animate-up" style="--delay: 0.2s">
         <span class="metric-label">借用逾期</span>
         <strong class="metric-value">{{ overview.overdueBorrows || 0 }}</strong>
         <span class="metric-sub">已到期但未归还的借用单</span>
       </article>
-      <article class="metric-card accent">
+      <article class="metric-card accent animate-up" style="--delay: 0.3s">
         <span class="metric-label">门禁待处理</span>
         <strong class="metric-value">{{ overview.pendingDoorReminders || 0 }}</strong>
         <span class="metric-sub">今日待确认开门的提醒</span>
       </article>
-      <article class="metric-card danger">
+      <article class="metric-card danger animate-up" style="--delay: 0.4s">
         <span class="metric-label">设备风险</span>
         <strong class="metric-value">{{ overview.highRiskAlerts || overview.riskAlerts || 0 }}</strong>
         <span class="metric-sub">高风险优先，建议值班老师先处理</span>
       </article>
-      <article class="metric-card">
+      <article class="metric-card animate-up" style="--delay: 0.5s">
         <span class="metric-label">实验室使用率</span>
         <strong class="metric-value">{{ usageRateText }}</strong>
         <span class="metric-sub">按当前忙碌实验室占比估算</span>
       </article>
-      <article class="metric-card">
+      <article class="metric-card animate-up" style="--delay: 0.6s">
         <span class="metric-label">今日告警</span>
         <strong class="metric-value">{{ overview.alarmsToday || 0 }}</strong>
         <span class="metric-sub">来自传感器与 AI 风险联动</span>
@@ -50,7 +50,7 @@
     </section>
 
     <section class="panel-grid">
-      <article class="panel-card panel-span-2">
+      <article class="panel-card panel-span-2 animate-up" style="--delay: 0.5s">
         <div class="panel-head">
           <div>
             <h3>近 7 天趋势</h3>
@@ -75,7 +75,7 @@
         <el-empty v-else description="暂无趋势数据" />
       </article>
 
-      <article class="panel-card">
+      <article class="panel-card animate-up" style="--delay: 0.6s">
         <div class="panel-head">
           <div>
             <h3>风险提醒</h3>
@@ -100,7 +100,7 @@
         <el-empty v-else description="当前暂无风险提醒" />
       </article>
 
-      <article class="panel-card panel-span-2">
+      <article class="panel-card panel-span-2 animate-up" style="--delay: 0.7s">
         <div class="panel-head">
           <div>
             <h3>实验室使用热度</h3>
@@ -122,7 +122,7 @@
         <el-empty v-else description="暂无实验室使用数据" />
       </article>
 
-      <article class="panel-card">
+      <article class="panel-card animate-up" style="--delay: 0.8s">
         <div class="panel-head">
           <div>
             <h3>值班建议</h3>
@@ -201,10 +201,27 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-up {
+  opacity: 0;
+  animation: fadeUp 0.6s ease-out forwards;
+  animation-delay: var(--delay, 0s);
+}
+
 .ops-page {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  animation: fadeIn 0.6s ease-out;
 }
 
 .hero-card,

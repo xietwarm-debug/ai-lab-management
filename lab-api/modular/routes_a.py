@@ -11,6 +11,10 @@ USER_ROLES = {"student", "teacher", "admin"}
 ROLE_ALIAS = {"user": "student"}
 DEFAULT_ADMIN_RESET_PASSWORD = str(os.getenv("ADMIN_RESET_PASSWORD_DEFAULT", "123456") or "123456")
 KNOWLEDGE_DOC_STATUS_SET = {"draft", "active", "disabled"}
+DUTY_STATUS_SET = {"scheduled", "on_duty", "completed", "closed"}
+EMERGENCY_CONTACT_STATUS_SET = {"active", "inactive"}
+INCIDENT_LEVEL_SET = {"low", "medium", "high", "critical"}
+INCIDENT_STATUS_SET = {"reported", "processing", "closed"}
 
 
 def _normalize_role(value):
@@ -101,6 +105,85 @@ def _normalize_ids(value):
 
 def _normalize_device_name(value):
     return str(value or "").strip()[:128]
+
+
+def _normalize_short_text(value, field_name, max_len=255, default_value=""):
+    text = str(value if value not in (None, "") else default_value).strip()
+    if len(text) > int(max_len):
+        raise BizError(f"{field_name} too long", 400)
+    return text
+
+
+def _normalize_choice(value, field_name, allowed_values, default_value):
+    text = str(value if value not in (None, "") else default_value).strip().lower()
+    if text not in allowed_values:
+        raise BizError(f"invalid {field_name}", 400)
+    return text
+
+
+def _normalize_optional_date(value, field_name):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    dt = _parse_date_yyyy_mm_dd(text)
+    if not dt:
+        raise BizError(f"invalid {field_name}", 400)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _normalize_duty_payload(payload):
+    data = payload if isinstance(payload, dict) else {}
+    duty_date = _normalize_optional_date(data.get("dutyDate"), "dutyDate")
+    if not duty_date:
+        raise BizError("dutyDate required", 400)
+    return {
+        "dutyDate": duty_date,
+        "shiftName": _normalize_short_text(data.get("shiftName"), "shiftName", 32),
+        "assigneeName": _normalize_short_text(data.get("assigneeName"), "assigneeName", 64),
+        "assigneePhone": _normalize_short_text(data.get("assigneePhone"), "assigneePhone", 32),
+        "backupName": _normalize_short_text(data.get("backupName"), "backupName", 64),
+        "backupPhone": _normalize_short_text(data.get("backupPhone"), "backupPhone", 32),
+        "status": _normalize_choice(data.get("status"), "status", DUTY_STATUS_SET, "scheduled"),
+        "note": _normalize_short_text(data.get("note"), "note", 255),
+    }
+
+
+def _normalize_emergency_contact_payload(payload):
+    data = payload if isinstance(payload, dict) else {}
+    name = _normalize_short_text(data.get("name"), "name", 64)
+    phone = _normalize_short_text(data.get("phone"), "phone", 32)
+    if not name:
+        raise BizError("name required", 400)
+    if not phone:
+        raise BizError("phone required", 400)
+    return {
+        "name": name,
+        "roleName": _normalize_short_text(data.get("roleName"), "roleName", 64),
+        "phone": phone,
+        "priorityNo": _normalize_non_negative_int(data.get("priorityNo"), "priorityNo", 100, 9999),
+        "status": _normalize_choice(data.get("status"), "status", EMERGENCY_CONTACT_STATUS_SET, "active"),
+        "description": _normalize_short_text(data.get("description"), "description", 255),
+    }
+
+
+def _normalize_incident_payload(payload):
+    data = payload if isinstance(payload, dict) else {}
+    title = _normalize_short_text(data.get("title"), "title", 120)
+    if not title:
+        raise BizError("title required", 400)
+    lab_id = _normalize_optional_int(data.get("labId"), "labId", 1, 99999999)
+    return {
+        "labId": lab_id,
+        "labName": _normalize_short_text(data.get("labName"), "labName", 128),
+        "title": title,
+        "incidentLevel": _normalize_choice(data.get("incidentLevel"), "incidentLevel", INCIDENT_LEVEL_SET, "medium"),
+        "status": _normalize_choice(data.get("status"), "status", INCIDENT_STATUS_SET, "reported"),
+        "reporterName": _normalize_short_text(data.get("reporterName"), "reporterName", 64),
+        "reporterPhone": _normalize_short_text(data.get("reporterPhone"), "reporterPhone", 32),
+        "emergencyContactName": _normalize_short_text(data.get("emergencyContactName"), "emergencyContactName", 64),
+        "description": str(data.get("description") or "").strip()[:5000],
+        "disposalNote": str(data.get("disposalNote") or "").strip()[:5000],
+    }
 
 
 def _normalize_knowledge_doc_payload(payload, *, allow_partial=False):
@@ -383,6 +466,33 @@ def _assert_ai_permission_grant_target(target_row):
         raise BizError("only teacher or student can be granted ai permission", 400)
 
 
+def _assert_user_permission_grant_target(target_row):
+    target = target_row or {}
+    role = str(target.get("role") or "").strip().lower()
+    if role == "admin":
+        raise BizError("admin already has all permissions", 409)
+    if role not in {"teacher", "student"}:
+        raise BizError("invalid target role", 400)
+
+
+def _build_auth_session_payload(user_row, token, refresh_token):
+    user = user_row or {}
+    actor = {
+        "id": int(user.get("id") or 0),
+        "username": str(user.get("username") or "").strip(),
+        "role": str(user.get("role") or "").strip(),
+    }
+    return {
+        "userId": actor["id"],
+        "username": actor["username"],
+        "role": actor["role"],
+        "permissions": list_effective_user_permissions(actor),
+        "token": token,
+        "refreshToken": refresh_token,
+        "expiresIn": JWT_EXPIRE_SECONDS,
+    }
+
+
 def _assert_user_editable(target_row, current_user, block_self=True):
     target = target_row or {}
     actor = current_user or {}
@@ -508,13 +618,13 @@ def reservation_rules():
 
 
 @app.get("/admin/reservation-rules")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def get_admin_reservation_rules():
     return jsonify({"ok": True, "data": get_reservation_rules_admin_payload()})
 
 
 @app.post("/admin/reservation-rules")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def save_admin_reservation_rules():
     data = request.get_json(force=True) or {}
     actor = g.current_user or {}
@@ -1295,14 +1405,7 @@ def login():
     return jsonify(
         {
             "ok": True,
-            "data": {
-                "userId": row[0]["id"],
-                "username": row[0]["username"],
-                "role": db_role,
-                "token": token,
-                "refreshToken": refresh_token,
-                "expiresIn": JWT_EXPIRE_SECONDS,
-            },
+            "data": _build_auth_session_payload(row[0], token, refresh_token),
         }
     )
 
@@ -1371,14 +1474,11 @@ def register():
     return jsonify(
         {
             "ok": True,
-            "data": {
-                "userId": new_id,
-                "username": username,
-                "role": "student",
-                "token": token,
-                "refreshToken": refresh_token,
-                "expiresIn": JWT_EXPIRE_SECONDS,
-            },
+            "data": _build_auth_session_payload(
+                {"id": new_id, "username": username, "role": "student"},
+                token,
+                refresh_token,
+            ),
         }
     )
 
@@ -1452,14 +1552,7 @@ def refresh_access_token():
     return jsonify(
         {
             "ok": True,
-            "data": {
-                "userId": user["id"],
-                "username": user["username"],
-                "role": user["role"],
-                "token": access_token,
-                "refreshToken": new_refresh,
-                "expiresIn": JWT_EXPIRE_SECONDS,
-            },
+            "data": _build_auth_session_payload(user, access_token, new_refresh),
         }
     )
 
@@ -2099,6 +2192,13 @@ def get_user_detail(uid):
                 "role": user_row.get("role"),
             }
         ),
+        "permissions": list_user_permission_statuses(
+            {
+                "id": user_row.get("id"),
+                "username": user_row.get("username"),
+                "role": user_row.get("role"),
+            }
+        ),
         "summary": {
             "reservationTotal": int((reservation_count_rows[0] or {}).get("cnt") or 0) if reservation_count_rows else 0,
             "repairTotal": int((repair_count_rows[0] or {}).get("cnt") or 0) if repair_count_rows else 0,
@@ -2265,8 +2365,584 @@ def revoke_user_ai_permission(uid):
     )
 
 
-@app.get("/admin/todo-center")
+@app.get("/users/<int:uid>/permissions")
 @auth_required(roles=["admin"])
+def get_user_permissions(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    items = list_user_permission_statuses(
+        {
+            "id": target.get("id"),
+            "username": target.get("username"),
+            "role": target.get("role"),
+        }
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "user": {
+                    "id": int(target.get("id") or 0),
+                    "username": str(target.get("username") or "").strip(),
+                    "role": str(target.get("role") or "").strip(),
+                },
+                "items": items,
+            },
+        }
+    )
+
+
+@app.post("/users/<int:uid>/permissions/grant")
+@auth_required(roles=["admin"])
+def grant_user_permission(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    _assert_user_permission_grant_target(target)
+
+    payload = request.get_json(force=True) or {}
+    permission_code = _normalize_general_permission_code(payload.get("permissionCode"))
+    expires_at_text = normalize_ai_permission_expires_at_text(payload.get("expiresAt"))
+    actor = g.current_user or {}
+
+    def _tx(cur):
+        cur.execute(
+            """
+            INSERT INTO user_permission (
+                user_id, username, permission_code, granted_by, granted_by_name, expires_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                username=VALUES(username),
+                granted_by=VALUES(granted_by),
+                granted_by_name=VALUES(granted_by_name),
+                expires_at=VALUES(expires_at)
+            """,
+            (
+                int(target.get("id") or 0),
+                str(target.get("username") or "").strip(),
+                permission_code,
+                _to_int_or_none(actor.get("id")),
+                str(actor.get("username") or "").strip(),
+                expires_at_text or None,
+            ),
+        )
+
+    run_in_transaction(_tx)
+    status = get_user_permission_status(
+        {
+            "id": target.get("id"),
+            "username": target.get("username"),
+            "role": target.get("role"),
+        },
+        permission_code,
+    )
+    audit_log(
+        "admin.user_permission.grant",
+        target_type="user_permission",
+        target_id=f"{int(target.get('id') or 0)}:{permission_code}",
+        detail={
+            "targetUserId": int(target.get("id") or 0),
+            "targetUsername": str(target.get("username") or "").strip(),
+            "targetRole": str(target.get("role") or "").strip(),
+            "permissionCode": permission_code,
+            "expiresAt": expires_at_text,
+        },
+        actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "userId": int(target.get("id") or 0),
+                "permission": status,
+            },
+        }
+    )
+
+
+@app.post("/users/<int:uid>/permissions/revoke")
+@auth_required(roles=["admin"])
+def revoke_user_permission(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    _assert_user_permission_grant_target(target)
+
+    payload = request.get_json(force=True) or {}
+    permission_code = _normalize_general_permission_code(payload.get("permissionCode"))
+    actor = g.current_user or {}
+
+    def _tx(cur):
+        cur.execute(
+            """
+            DELETE FROM user_permission
+            WHERE user_id=%s
+              AND permission_code=%s
+            """,
+            (int(target.get("id") or 0), permission_code),
+        )
+        return int(cur.rowcount or 0)
+
+    changed = int(run_in_transaction(_tx) or 0) > 0
+    audit_log(
+        "admin.user_permission.revoke",
+        target_type="user_permission",
+        target_id=f"{int(target.get('id') or 0)}:{permission_code}",
+        detail={
+            "targetUserId": int(target.get("id") or 0),
+            "targetUsername": str(target.get("username") or "").strip(),
+            "targetRole": str(target.get("role") or "").strip(),
+            "permissionCode": permission_code,
+            "changed": changed,
+        },
+        actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "userId": int(target.get("id") or 0),
+                "permissionCode": permission_code,
+                "changed": changed,
+            },
+        }
+    )
+
+
+@app.get("/admin/duty-roster")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def list_duty_roster():
+    start_date = _normalize_optional_date(request.args.get("startDate"), "startDate")
+    end_date = _normalize_optional_date(request.args.get("endDate"), "endDate")
+    status = str(request.args.get("status") or "").strip().lower()
+    if status and status not in DUTY_STATUS_SET:
+        raise BizError("invalid status", 400)
+    if start_date and end_date and start_date > end_date:
+        raise BizError("invalid date range", 400)
+
+    where_sql = " WHERE 1=1"
+    params = []
+    if start_date:
+        where_sql += " AND duty_date>=%s"
+        params.append(start_date)
+    if end_date:
+        where_sql += " AND duty_date<=%s"
+        params.append(end_date)
+    if status:
+        where_sql += " AND status=%s"
+        params.append(status)
+
+    rows = query(
+        """
+        SELECT id,
+               duty_date AS dutyDate,
+               shift_name AS shiftName,
+               assignee_name AS assigneeName,
+               assignee_phone AS assigneePhone,
+               backup_name AS backupName,
+               backup_phone AS backupPhone,
+               status,
+               note,
+               created_by AS createdBy,
+               updated_by AS updatedBy,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM duty_roster
+        """
+        + where_sql
+        + " ORDER BY duty_date ASC, id ASC",
+        tuple(params),
+    )
+    for row in rows or []:
+        row["dutyDate"] = str(row.get("dutyDate") or "")
+        row["createdAt"] = _to_text_time(row.get("createdAt"))
+        row["updatedAt"] = _to_text_time(row.get("updatedAt"))
+    return jsonify({"ok": True, "data": rows})
+
+
+@app.post("/admin/duty-roster")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def save_duty_roster():
+    raw = request.get_json(force=True) or {}
+    payload = _normalize_duty_payload(raw)
+    duty_id = _normalize_optional_int(raw.get("id"), "id", 1, 99999999)
+    actor = g.current_user or {}
+    actor_name = str(actor.get("username") or "").strip()
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if duty_id:
+        exists = query("SELECT id FROM duty_roster WHERE id=%s LIMIT 1", (int(duty_id),))
+        if not exists:
+            raise BizError("duty roster not found", 404)
+        execute(
+            """
+            UPDATE duty_roster
+            SET duty_date=%s,
+                shift_name=%s,
+                assignee_name=%s,
+                assignee_phone=%s,
+                backup_name=%s,
+                backup_phone=%s,
+                status=%s,
+                note=%s,
+                updated_by=%s,
+                updated_at=%s
+            WHERE id=%s
+            """,
+            (
+                payload["dutyDate"],
+                payload["shiftName"],
+                payload["assigneeName"],
+                payload["assigneePhone"],
+                payload["backupName"],
+                payload["backupPhone"],
+                payload["status"],
+                payload["note"],
+                actor_name,
+                now_text,
+                int(duty_id),
+            ),
+        )
+        saved_id = int(duty_id)
+        audit_log("admin.duty_roster.update", target_type="duty_roster", target_id=saved_id, detail=payload, actor=actor)
+    else:
+        saved_id = execute_insert(
+            """
+            INSERT INTO duty_roster (
+                duty_date, shift_name, assignee_name, assignee_phone, backup_name, backup_phone,
+                status, note, created_by, updated_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                payload["dutyDate"],
+                payload["shiftName"],
+                payload["assigneeName"],
+                payload["assigneePhone"],
+                payload["backupName"],
+                payload["backupPhone"],
+                payload["status"],
+                payload["note"],
+                actor_name,
+                actor_name,
+                now_text,
+                now_text,
+            ),
+        )
+        audit_log("admin.duty_roster.create", target_type="duty_roster", target_id=saved_id, detail=payload, actor=actor)
+    return jsonify({"ok": True, "data": {"id": int(saved_id)}})
+
+
+@app.post("/admin/duty-roster/<int:duty_id>/status")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def update_duty_roster_status(duty_id):
+    payload = request.get_json(force=True) or {}
+    status = _normalize_choice(payload.get("status"), "status", DUTY_STATUS_SET, "scheduled")
+    note = _normalize_short_text(payload.get("note"), "note", 255)
+    actor_name = str((g.current_user or {}).get("username") or "").strip()
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    exists = query("SELECT id FROM duty_roster WHERE id=%s LIMIT 1", (int(duty_id),))
+    if not exists:
+        raise BizError("duty roster not found", 404)
+    execute(
+        "UPDATE duty_roster SET status=%s, note=%s, updated_by=%s, updated_at=%s WHERE id=%s",
+        (status, note, actor_name, now_text, int(duty_id)),
+    )
+    audit_log(
+        "admin.duty_roster.status",
+        target_type="duty_roster",
+        target_id=duty_id,
+        detail={"status": status, "note": note},
+        actor=g.current_user or {},
+    )
+    return jsonify({"ok": True, "data": {"id": int(duty_id), "status": status}})
+
+
+@app.get("/admin/emergency-contacts")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def list_emergency_contacts():
+    status = str(request.args.get("status") or "").strip().lower()
+    if status and status not in EMERGENCY_CONTACT_STATUS_SET:
+        raise BizError("invalid status", 400)
+    where_sql = ""
+    params = []
+    if status:
+        where_sql = " WHERE status=%s"
+        params.append(status)
+    rows = query(
+        """
+        SELECT id,
+               name,
+               role_name AS roleName,
+               phone,
+               priority_no AS priorityNo,
+               status,
+               description,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM emergency_contact
+        """
+        + where_sql
+        + " ORDER BY priority_no ASC, id ASC",
+        tuple(params),
+    )
+    for row in rows or []:
+        row["createdAt"] = _to_text_time(row.get("createdAt"))
+        row["updatedAt"] = _to_text_time(row.get("updatedAt"))
+    return jsonify({"ok": True, "data": rows})
+
+
+@app.post("/admin/emergency-contacts")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def save_emergency_contact():
+    raw = request.get_json(force=True) or {}
+    payload = _normalize_emergency_contact_payload(raw)
+    contact_id = _normalize_optional_int(raw.get("id"), "id", 1, 99999999)
+    actor_name = str((g.current_user or {}).get("username") or "").strip()
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if contact_id:
+        exists = query("SELECT id FROM emergency_contact WHERE id=%s LIMIT 1", (int(contact_id),))
+        if not exists:
+            raise BizError("emergency contact not found", 404)
+        execute(
+            """
+            UPDATE emergency_contact
+            SET name=%s,
+                role_name=%s,
+                phone=%s,
+                priority_no=%s,
+                status=%s,
+                description=%s,
+                updated_by=%s,
+                updated_at=%s
+            WHERE id=%s
+            """,
+            (
+                payload["name"],
+                payload["roleName"],
+                payload["phone"],
+                payload["priorityNo"],
+                payload["status"],
+                payload["description"],
+                actor_name,
+                now_text,
+                int(contact_id),
+            ),
+        )
+        saved_id = int(contact_id)
+        audit_log("admin.emergency_contact.update", target_type="emergency_contact", target_id=saved_id, detail=payload, actor=g.current_user or {})
+    else:
+        saved_id = execute_insert(
+            """
+            INSERT INTO emergency_contact (
+                name, role_name, phone, priority_no, status, description, created_by, updated_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                payload["name"],
+                payload["roleName"],
+                payload["phone"],
+                payload["priorityNo"],
+                payload["status"],
+                payload["description"],
+                actor_name,
+                actor_name,
+                now_text,
+                now_text,
+            ),
+        )
+        audit_log("admin.emergency_contact.create", target_type="emergency_contact", target_id=saved_id, detail=payload, actor=g.current_user or {})
+    return jsonify({"ok": True, "data": {"id": int(saved_id)}})
+
+
+@app.post("/admin/emergency-contacts/<int:contact_id>/delete")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def delete_emergency_contact(contact_id):
+    changed = execute("DELETE FROM emergency_contact WHERE id=%s", (int(contact_id),))
+    if int(changed or 0) <= 0:
+        raise BizError("emergency contact not found", 404)
+    audit_log("admin.emergency_contact.delete", target_type="emergency_contact", target_id=contact_id, actor=g.current_user or {})
+    return jsonify({"ok": True})
+
+
+@app.get("/admin/incidents")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def list_incidents():
+    status = str(request.args.get("status") or "").strip().lower()
+    incident_level = str(request.args.get("incidentLevel") or "").strip().lower()
+    keyword = str(request.args.get("keyword") or "").strip()
+    if status and status not in INCIDENT_STATUS_SET:
+        raise BizError("invalid status", 400)
+    if incident_level and incident_level not in INCIDENT_LEVEL_SET:
+        raise BizError("invalid incidentLevel", 400)
+    where_sql = " WHERE 1=1"
+    params = []
+    if status:
+        where_sql += " AND status=%s"
+        params.append(status)
+    if incident_level:
+        where_sql += " AND incident_level=%s"
+        params.append(incident_level)
+    if keyword:
+        where_sql += " AND (incident_no LIKE %s OR title LIKE %s OR lab_name LIKE %s OR reporter_name LIKE %s)"
+        like_keyword = f"%{keyword}%"
+        params.extend([like_keyword, like_keyword, like_keyword, like_keyword])
+    rows = query(
+        """
+        SELECT id,
+               incident_no AS incidentNo,
+               lab_id AS labId,
+               lab_name AS labName,
+               title,
+               incident_level AS incidentLevel,
+               status,
+               reporter_name AS reporterName,
+               reporter_phone AS reporterPhone,
+               emergency_contact_name AS emergencyContactName,
+               description,
+               disposal_note AS disposalNote,
+               closed_at AS closedAt,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM incident_record
+        """
+        + where_sql
+        + " ORDER BY id DESC",
+        tuple(params),
+    )
+    for row in rows or []:
+        row["closedAt"] = _to_text_time(row.get("closedAt"))
+        row["createdAt"] = _to_text_time(row.get("createdAt"))
+        row["updatedAt"] = _to_text_time(row.get("updatedAt"))
+    return jsonify({"ok": True, "data": rows})
+
+
+@app.post("/admin/incidents")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def save_incident():
+    raw = request.get_json(force=True) or {}
+    payload = _normalize_incident_payload(raw)
+    incident_id = _normalize_optional_int(raw.get("id"), "id", 1, 99999999)
+    actor_name = str((g.current_user or {}).get("username") or "").strip()
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    closed_at = now_text if payload["status"] == "closed" else None
+
+    if incident_id:
+        exists = query("SELECT id, incident_no AS incidentNo FROM incident_record WHERE id=%s LIMIT 1", (int(incident_id),))
+        if not exists:
+            raise BizError("incident not found", 404)
+        incident_no = str((exists[0] or {}).get("incidentNo") or "").strip()
+        execute(
+            """
+            UPDATE incident_record
+            SET lab_id=%s,
+                lab_name=%s,
+                title=%s,
+                incident_level=%s,
+                status=%s,
+                reporter_name=%s,
+                reporter_phone=%s,
+                emergency_contact_name=%s,
+                description=%s,
+                disposal_note=%s,
+                closed_at=%s,
+                updated_by=%s,
+                updated_at=%s
+            WHERE id=%s
+            """,
+            (
+                payload["labId"],
+                payload["labName"],
+                payload["title"],
+                payload["incidentLevel"],
+                payload["status"],
+                payload["reporterName"],
+                payload["reporterPhone"],
+                payload["emergencyContactName"],
+                payload["description"],
+                payload["disposalNote"],
+                closed_at,
+                actor_name,
+                now_text,
+                int(incident_id),
+            ),
+        )
+        saved_id = int(incident_id)
+        audit_log("admin.incident.update", target_type="incident_record", target_id=saved_id, detail=payload, actor=g.current_user or {})
+        return jsonify({"ok": True, "data": {"id": saved_id, "incidentNo": incident_no}})
+
+    def _tx(cur):
+        cur.execute(
+            """
+            INSERT INTO incident_record (
+                incident_no, lab_id, lab_name, title, incident_level, status,
+                reporter_name, reporter_phone, emergency_contact_name, description,
+                disposal_note, closed_at, created_by, updated_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                "",
+                payload["labId"],
+                payload["labName"],
+                payload["title"],
+                payload["incidentLevel"],
+                payload["status"],
+                payload["reporterName"],
+                payload["reporterPhone"],
+                payload["emergencyContactName"],
+                payload["description"],
+                payload["disposalNote"],
+                closed_at,
+                actor_name,
+                actor_name,
+                now_text,
+                now_text,
+            ),
+        )
+        new_id = int(cur.lastrowid or 0)
+        incident_no = f"IR{datetime.now().strftime('%Y%m%d')}{new_id:04d}"
+        cur.execute("UPDATE incident_record SET incident_no=%s WHERE id=%s", (incident_no, new_id))
+        return {"id": new_id, "incidentNo": incident_no}
+
+    saved = run_in_transaction(_tx)
+    audit_log("admin.incident.create", target_type="incident_record", target_id=saved.get("id"), detail=payload, actor=g.current_user or {})
+    return jsonify({"ok": True, "data": saved})
+
+
+@app.post("/admin/incidents/<int:incident_id>/status")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
+def update_incident_status(incident_id):
+    raw = request.get_json(force=True) or {}
+    status = _normalize_choice(raw.get("status"), "status", INCIDENT_STATUS_SET, "reported")
+    disposal_note = str(raw.get("disposalNote") or "").strip()[:5000]
+    actor_name = str((g.current_user or {}).get("username") or "").strip()
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    exists = query("SELECT id FROM incident_record WHERE id=%s LIMIT 1", (int(incident_id),))
+    if not exists:
+        raise BizError("incident not found", 404)
+    execute(
+        """
+        UPDATE incident_record
+        SET status=%s,
+            disposal_note=%s,
+            closed_at=%s,
+            updated_by=%s,
+            updated_at=%s
+        WHERE id=%s
+        """,
+        (status, disposal_note, now_text if status == "closed" else None, actor_name, now_text, int(incident_id)),
+    )
+    audit_log(
+        "admin.incident.status",
+        target_type="incident_record",
+        target_id=incident_id,
+        detail={"status": status},
+        actor=g.current_user or {},
+    )
+    return jsonify({"ok": True, "data": {"id": int(incident_id), "status": status}})
+
+
+@app.get("/admin/todo-center")
+@auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
 def admin_todo_center():
     sort_by = _normalize_todo_sort(request.args.get("sortBy"))
     sort_order = _normalize_todo_order(request.args.get("sortOrder"))
@@ -2279,7 +2955,6 @@ def admin_todo_center():
     today_start = now_dt.strftime("%Y-%m-%d 00:00:00")
     tomorrow_start = (now_dt + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
     seven_days_ago_start = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    task_deadline_limit = (now_dt + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
 
     def _age_minutes(time_value):
         dt = _to_datetime(time_value)
@@ -2514,98 +3189,11 @@ def admin_todo_center():
     claim_items = _sort_todo_items(claim_items, sort_by=sort_by, sort_order=sort_order)
     claim_items = claim_items[:limit_per_card]
     claim_timeout_count = len([x for x in claim_items if x.get("timeout")])
-
-    task_rows = query(
-        """
-        SELECT t.id,
-               t.course_id AS courseId,
-               t.title,
-               t.deadline,
-               t.created_at AS createdAt,
-               c.name AS courseName,
-               c.class_name AS className,
-               (
-                   SELECT COUNT(*)
-                   FROM course_member cm
-                   WHERE cm.course_id=t.course_id
-                     AND cm.status='active'
-               ) AS totalStudents,
-               (
-                   SELECT COUNT(DISTINCT s.student_user_name)
-                   FROM experiment_task_submission s
-                   WHERE s.task_id=t.id
-                     AND s.status='active'
-               ) AS submittedStudents
-        FROM experiment_task t
-        LEFT JOIN course c ON c.id=t.course_id
-        WHERE t.status='active'
-          AND c.status='enabled'
-          AND t.deadline IS NOT NULL
-          AND t.deadline <= %s
-        ORDER BY t.deadline ASC, t.id ASC
-        LIMIT %s
-        """,
-        (task_deadline_limit, scan_limit),
-    )
-    task_count_rows = query(
-        """
-        SELECT COUNT(*) AS cnt
-        FROM (
-            SELECT t.id
-            FROM experiment_task t
-            LEFT JOIN course c ON c.id=t.course_id
-            WHERE t.status='active'
-              AND c.status='enabled'
-              AND t.deadline IS NOT NULL
-              AND t.deadline <= %s
-              AND (
-                   SELECT COUNT(*)
-                   FROM course_member cm
-                   WHERE cm.course_id=t.course_id
-                     AND cm.status='active'
-              ) > (
-                   SELECT COUNT(DISTINCT s.student_user_name)
-                   FROM experiment_task_submission s
-                   WHERE s.task_id=t.id
-                     AND s.status='active'
-              )
-        ) t1
-        """,
-        (task_deadline_limit,),
-    )
-    task_total = int((task_count_rows[0] or {}).get("cnt") or 0) if task_count_rows else 0
+    task_total = 0
     task_items = []
-    for row in task_rows:
-        task_id = int(row.get("id") or 0)
-        course_id = int(row.get("courseId") or 0)
-        if task_id <= 0 or course_id <= 0:
-            continue
-        total_students = int(row.get("totalStudents") or 0)
-        submitted_students = int(row.get("submittedStudents") or 0)
-        missing_students = max(0, total_students - submitted_students)
-        if missing_students <= 0:
-            continue
-        deadline_at = _to_text_time(row.get("deadline"))
-        created_at = _to_text_time(row.get("createdAt"))
-        hours_left = _hours_to(deadline_at)
-        timeout = bool(hours_left <= 0)
-        score = 60 + min(25, missing_students * 4)
-        if hours_left <= 6:
-            score += 20
-        elif hours_left <= 24:
-            score += 12
-        elif hours_left <= 48:
-            score += 6
-        if timeout:
-            score += 12
-        score = max(0, min(99, int(score)))
-        task_items.append(
-            {
-                "id": f"course_task_due:{task_id}",
-                "category": "course_task_due",
-                "entityId": task_id,
-                "courseId": course_id,
-                "taskId": task_id,
+    task_timeout_count = 0
+    """
+
                 "title": f"{str(row.get('courseName') or '').strip() or '-'} · {str(row.get('title') or '').strip() or '-'}",
                 "subtitle": f"missing: {missing_students}/{max(0, total_students)}",
                 "detail": str(row.get("className") or "").strip(),
@@ -2622,6 +3210,7 @@ def admin_todo_center():
     task_items = task_items[:limit_per_card]
     task_timeout_count = len([x for x in task_items if x.get("timeout")])
 
+    """
     announcement_rows = query(
         """
         SELECT id,
@@ -2750,6 +3339,7 @@ def admin_todo_center():
             "批量立即发布",
         ),
     ]
+    cards = [card for card in cards if str(card.get("category") or "").strip() != "course_task_due"]
 
     flat_items = []
     for card in cards:
@@ -3342,6 +3932,220 @@ def admin_stats_dashboard():
     )
 
 
+@app.get("/stats/operations-board")
+@auth_required(roles=["admin", "teacher"], permissions=[PERMISSION_DUTY_OPERATOR])
+def stats_operations_board():
+    now_dt = datetime.now()
+    now_text = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    today = now_dt.date()
+    today_text = today.strftime("%Y-%m-%d")
+    seven_days_ago = today - timedelta(days=6)
+    seven_days_ago_text = seven_days_ago.strftime("%Y-%m-%d")
+    seven_days_ago_start = f"{seven_days_ago_text} 00:00:00"
+
+    reservation_today_rows = _safe_stats_query(
+        "SELECT COUNT(*) AS cnt FROM reservation WHERE date=%s",
+        (today_text,),
+    )
+    today_reservations = _to_stat_int(((reservation_today_rows or [{}])[0] or {}).get("cnt"))
+
+    overdue_borrow_rows = _safe_stats_query(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM equipment_borrow_request
+        WHERE status='approved'
+          AND returned_at IS NULL
+          AND expected_return_at IS NOT NULL
+          AND expected_return_at < %s
+        """,
+        (now_text,),
+    )
+    overdue_borrows = _to_stat_int(((overdue_borrow_rows or [{}])[0] or {}).get("cnt"))
+
+    pending_door_rows = _safe_stats_query(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM door_open_reminders
+        WHERE occurrence_date=%s
+          AND door_status='pending'
+        """,
+        (today_text,),
+    )
+    pending_door_reminders = _to_stat_int(((pending_door_rows or [{}])[0] or {}).get("cnt"))
+
+    alarm_today_rows = _safe_stats_query(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM lab_sensor_alarm
+        WHERE created_at >= %s
+          AND created_at < %s
+        """,
+        (f"{today_text} 00:00:00", f"{(today + timedelta(days=1)).strftime('%Y-%m-%d')} 00:00:00"),
+    )
+    alarms_today = _to_stat_int(((alarm_today_rows or [{}])[0] or {}).get("cnt"))
+
+    lab_summary_rows = _safe_stats_query(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status='busy' THEN 1 ELSE 0 END) AS busyCnt,
+               SUM(CASE WHEN status='free' THEN 1 ELSE 0 END) AS freeCnt
+        FROM lab
+        """
+    )
+    lab_summary = (lab_summary_rows or [{}])[0] or {}
+    lab_total = _to_stat_int(lab_summary.get("total"))
+    busy_lab_count = _to_stat_int(lab_summary.get("busyCnt"))
+    lab_usage_rate = round((busy_lab_count / float(lab_total) * 100), 1) if lab_total > 0 else 0
+
+    active_lab_rows = _safe_stats_query(
+        """
+        SELECT COUNT(DISTINCT lab_name) AS cnt
+        FROM reservation
+        WHERE date=%s
+        """,
+        (today_text,),
+    )
+    today_active_labs = _to_stat_int(((active_lab_rows or [{}])[0] or {}).get("cnt"))
+
+    reservation_trend_rows = _safe_stats_query(
+        """
+        SELECT date AS day, COUNT(*) AS cnt
+        FROM reservation
+        WHERE date >= %s
+          AND date <= %s
+        GROUP BY date
+        ORDER BY day ASC
+        """,
+        (seven_days_ago_text, today_text),
+    )
+    reservation_trend_map = {
+        str(row.get("day") or "").strip(): _to_stat_int(row.get("cnt"))
+        for row in (reservation_trend_rows or [])
+        if str(row.get("day") or "").strip()
+    }
+
+    alarm_trend_rows = _safe_stats_query(
+        """
+        SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+        FROM lab_sensor_alarm
+        WHERE created_at >= %s
+        GROUP BY DATE(created_at)
+        ORDER BY day ASC
+        """,
+        (seven_days_ago_start,),
+    )
+    alarm_trend_map = {
+        str(row.get("day") or "").strip(): _to_stat_int(row.get("cnt"))
+        for row in (alarm_trend_rows or [])
+        if str(row.get("day") or "").strip()
+    }
+
+    overdue_trend_rows = _safe_stats_query(
+        """
+        SELECT DATE(expected_return_at) AS day, COUNT(*) AS cnt
+        FROM equipment_borrow_request
+        WHERE status='approved'
+          AND returned_at IS NULL
+          AND expected_return_at IS NOT NULL
+          AND expected_return_at >= %s
+          AND expected_return_at < %s
+        GROUP BY DATE(expected_return_at)
+        ORDER BY day ASC
+        """,
+        (seven_days_ago_start, now_text),
+    )
+    overdue_trend_map = {
+        str(row.get("day") or "").strip(): _to_stat_int(row.get("cnt"))
+        for row in (overdue_trend_rows or [])
+        if str(row.get("day") or "").strip()
+    }
+
+    trend7d = []
+    for index in range(7):
+        day_dt = seven_days_ago + timedelta(days=index)
+        day_text = day_dt.strftime("%Y-%m-%d")
+        trend7d.append(
+            {
+                "date": day_text,
+                "label": day_dt.strftime("%m-%d"),
+                "reservations": _to_stat_int(reservation_trend_map.get(day_text)),
+                "alarms": _to_stat_int(alarm_trend_map.get(day_text)),
+                "overdueBorrows": _to_stat_int(overdue_trend_map.get(day_text)),
+            }
+        )
+
+    usage_rows = _safe_stats_query(
+        """
+        SELECT l.id,
+               l.name AS labName,
+               l.status,
+               COUNT(r.id) AS reservationCnt,
+               SUM(CASE WHEN r.status='approved' THEN 1 ELSE 0 END) AS approvedCnt
+        FROM lab l
+        LEFT JOIN reservation r
+          ON r.lab_name=l.name
+         AND r.date >= %s
+         AND r.date <= %s
+        GROUP BY l.id, l.name, l.status
+        ORDER BY reservationCnt DESC, l.name ASC
+        LIMIT 8
+        """,
+        (seven_days_ago_text, today_text),
+    )
+    max_usage_count = max([_to_stat_int(row.get("reservationCnt")) for row in (usage_rows or [])] + [1])
+    lab_usage = []
+    for row in (usage_rows or []):
+        reservation_count = _to_stat_int(row.get("reservationCnt"))
+        lab_usage.append(
+            {
+                "labId": _to_stat_int(row.get("id")),
+                "labName": str(row.get("labName") or "").strip() or "未命名实验室",
+                "status": str(row.get("status") or "").strip() or "free",
+                "reservationCount": reservation_count,
+                "approvedCount": _to_stat_int(row.get("approvedCnt")),
+                "usageRate": round((reservation_count / float(max_usage_count)) * 100, 1) if max_usage_count > 0 else 0,
+            }
+        )
+
+    risk_payload = _build_admin_risk_alerts_payload()
+    risk_alerts = risk_payload.get("alerts") if isinstance(risk_payload.get("alerts"), list) else []
+    risk_summary = risk_payload.get("summary") if isinstance(risk_payload.get("summary"), dict) else {}
+    high_risk_count = len(
+        [
+            item
+            for item in risk_alerts
+            if str(item.get("level") or "").strip() in {"high", "critical"}
+        ]
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "generatedAt": now_text,
+                "overview": {
+                    "todayReservations": today_reservations,
+                    "overdueBorrows": overdue_borrows,
+                    "pendingDoorReminders": pending_door_reminders,
+                    "alarmsToday": alarms_today,
+                    "riskAlerts": len(risk_alerts),
+                    "highRiskAlerts": high_risk_count,
+                    "labUsageRate": lab_usage_rate,
+                    "busyLabCount": busy_lab_count,
+                    "labTotal": lab_total,
+                    "todayActiveLabs": today_active_labs,
+                },
+                "trend7d": trend7d,
+                "labUsage": lab_usage,
+                "risk": {
+                    "summary": risk_summary,
+                    "alerts": risk_alerts[:5],
+                },
+            },
+        }
+    )
+
+
 @app.get("/admin/ai/daily-brief")
 @auth_required(roles=["admin"])
 def admin_ai_daily_brief():
@@ -3562,6 +4366,40 @@ def admin_update_knowledge_document(doc_id):
     return jsonify({"ok": True, "data": _format_knowledge_document_row((detail_rows or [{}])[0])})
 
 
+@app.get("/admin/knowledge/documents/<int:doc_id>")
+@auth_required(roles=["admin"])
+def admin_get_knowledge_document_detail(doc_id):
+    rows = query(
+        """
+        SELECT id,
+               title,
+               category,
+               scope_role AS scopeRole,
+               status,
+               source_type AS sourceType,
+               source_url AS sourceUrl,
+               source_content AS content,
+               summary,
+               keywords,
+               chunk_count AS chunkCount,
+               last_indexed_at AS lastIndexedAt,
+               uploader_id AS uploaderId,
+               uploader_name AS uploaderName,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM knowledge_document
+        WHERE id=%s
+        LIMIT 1
+        """,
+        (int(doc_id),),
+    )
+    if not rows:
+        raise BizError("knowledge document not found", 404)
+    row = _format_knowledge_document_row(rows[0] or {})
+    row["content"] = str((rows[0] or {}).get("content") or "")
+    return jsonify({"ok": True, "data": row})
+
+
 @app.post("/admin/knowledge/documents/<int:doc_id>/status")
 @auth_required(roles=["admin"])
 def admin_update_knowledge_document_status(doc_id):
@@ -3635,8 +4473,105 @@ def feedback_knowledge():
     return jsonify({"ok": True, "data": {"id": int(new_id or 0)}})
 
 
-@app.get("/audit-logs")
+@app.get("/admin/knowledge/feedback")
 @auth_required(roles=["admin"])
+def admin_list_knowledge_feedback():
+    helpful_raw = str(request.args.get("helpful") or "").strip().lower()
+    keyword = str(request.args.get("keyword") or "").strip()
+    page, page_size, offset = _parse_page_and_size(
+        request.args.get("page", "1"),
+        request.args.get("pageSize", request.args.get("limit", "20")),
+    )
+
+    where_sql = " WHERE 1=1"
+    params = []
+    if helpful_raw in {"0", "1", "true", "false"}:
+        helpful_flag = 1 if helpful_raw in {"1", "true"} else 0
+        where_sql += " AND kf.helpful=%s"
+        params.append(helpful_flag)
+    if keyword:
+        kw = f"%{keyword}%"
+        where_sql += """
+            AND (
+                kf.username LIKE %s
+                OR kq.username LIKE %s
+                OR kq.query_text LIKE %s
+                OR kq.answer_text LIKE %s
+                OR kf.comment LIKE %s
+            )
+        """
+        params.extend([kw, kw, kw, kw, kw])
+
+    total_rows = query(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM knowledge_feedback kf
+        INNER JOIN knowledge_query_log kq ON kq.id=kf.query_log_id
+        """
+        + where_sql,
+        tuple(params),
+    )
+    total = int((total_rows[0] or {}).get("cnt") or 0) if total_rows else 0
+
+    rows = query(
+        """
+        SELECT kf.id,
+               kf.query_log_id AS queryLogId,
+               kf.user_id AS userId,
+               kf.username,
+               kf.helpful,
+               kf.comment,
+               kf.created_at AS createdAt,
+               kq.query_text AS question,
+               kq.answer_text AS answer,
+               kq.role,
+               kq.matched_count AS matchedCount,
+               kq.created_at AS askedAt
+        FROM knowledge_feedback kf
+        INNER JOIN knowledge_query_log kq ON kq.id=kf.query_log_id
+        """
+        + where_sql
+        + """
+        ORDER BY kf.id DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(list(params) + [page_size, offset]),
+    )
+
+    data = []
+    for row in rows or []:
+        data.append(
+            {
+                "id": int(row.get("id") or 0),
+                "queryLogId": int(row.get("queryLogId") or 0),
+                "userId": _to_int_or_none(row.get("userId")),
+                "username": str(row.get("username") or "").strip(),
+                "helpful": bool(int(row.get("helpful") or 0)),
+                "comment": str(row.get("comment") or "").strip(),
+                "createdAt": _to_text_time(row.get("createdAt")),
+                "question": str(row.get("question") or "").strip(),
+                "answer": str(row.get("answer") or "").strip(),
+                "role": str(row.get("role") or "").strip(),
+                "matchedCount": int(row.get("matchedCount") or 0),
+                "askedAt": _to_text_time(row.get("askedAt")),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "data": data,
+            "meta": {
+                "page": page,
+                "pageSize": page_size,
+                "total": total,
+            },
+        }
+    )
+
+
+@app.get("/audit-logs")
+@auth_required(roles=["admin"], permissions=[PERMISSION_AUDIT_VIEWER])
 def list_audit_logs():
     action = request.args.get("action", "").strip()
     operator = request.args.get("operator", "").strip()
@@ -3699,7 +4634,7 @@ def list_audit_logs():
 
 
 @app.get("/audit-logs/export")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_AUDIT_VIEWER])
 def export_audit_logs():
     action = request.args.get("action", "").strip()
     operator = request.args.get("operator", "").strip()

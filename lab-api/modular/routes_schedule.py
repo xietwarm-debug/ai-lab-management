@@ -649,7 +649,7 @@ def _query_reminders_by_range(start_date, end_date):
 
 
 @app.get("/admin/class-period-configs")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_list_class_period_configs():
     rows = query(
         """
@@ -668,7 +668,7 @@ def admin_list_class_period_configs():
 
 
 @app.get("/admin/schedule/templates")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_list_schedule_templates():
     rows = query(
         """
@@ -715,7 +715,7 @@ def admin_list_schedule_templates():
 
 
 @app.get("/admin/schedule/templates/<int:template_id>")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_get_schedule_template_detail(template_id):
     tpl = _resolve_template_row(template_id=template_id)
     if not tpl:
@@ -786,7 +786,7 @@ def admin_get_schedule_template_detail(template_id):
 
 
 @app.post("/admin/schedule/templates/<int:template_id>/activate")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_activate_schedule_template(template_id):
     actor = g.current_user or {}
     operator = str(actor.get("username") or "").strip()
@@ -819,7 +819,7 @@ def admin_activate_schedule_template(template_id):
 
 
 @app.post("/admin/schedule/templates/<int:template_id>/delete")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_delete_schedule_template(template_id):
     actor = g.current_user or {}
     operator = str(actor.get("username") or "").strip()
@@ -914,7 +914,7 @@ def admin_delete_schedule_template(template_id):
 
 
 @app.post("/admin/schedule/import")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_import_schedule():
     payload = request.get_json(force=True) or {}
     template_payload = payload.get("template") if isinstance(payload.get("template"), dict) else {}
@@ -1110,7 +1110,7 @@ def admin_import_schedule():
 
 
 @app.get("/admin/door-reminders/today")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_today_door_reminders():
     date_text = _parse_date_text(request.args.get("date"), "date", required=False) or datetime.now().strftime("%Y-%m-%d")
     tpl = _resolve_template_row(only_active=True)
@@ -1121,7 +1121,7 @@ def admin_today_door_reminders():
 
 
 @app.get("/admin/door-reminders/week")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_week_door_reminders():
     anchor = _parse_date_text(request.args.get("date"), "date", required=False) or datetime.now().strftime("%Y-%m-%d")
     anchor_dt = datetime.strptime(anchor, "%Y-%m-%d").date()
@@ -1135,7 +1135,7 @@ def admin_week_door_reminders():
 
 
 @app.get("/admin/door-reminders/records")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_door_reminder_records():
     end = _parse_date_text(request.args.get("endDate"), "endDate", required=False) or datetime.now().strftime("%Y-%m-%d")
     start = _parse_date_text(request.args.get("startDate"), "startDate", required=False)
@@ -1270,7 +1270,7 @@ def _update_reminder_group(reminder_id, target_door_status, target_remind_status
 
 
 @app.post("/admin/door-reminders/<int:reminder_id>/confirm-open")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_confirm_open_door(reminder_id):
     payload = request.get_json(force=True) or {}
     actor = g.current_user or {}
@@ -1288,7 +1288,7 @@ def admin_confirm_open_door(reminder_id):
 
 
 @app.post("/admin/door-reminders/<int:reminder_id>/ignore")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_ignore_open_door(reminder_id):
     payload = request.get_json(force=True) or {}
     actor = g.current_user or {}
@@ -1375,7 +1375,7 @@ def _query_lab_schedule_for_day(lab_id, date_text, template_row=None):
 
 
 @app.get("/admin/labs/<int:lab_id>/schedule/day")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_get_lab_schedule_day(lab_id):
     date_text = _parse_date_text(request.args.get("date"), "date", required=False) or datetime.now().strftime("%Y-%m-%d")
     lab_rows = query("SELECT id, name FROM lab WHERE id=%s LIMIT 1", (lab_id,))
@@ -1398,7 +1398,7 @@ def admin_get_lab_schedule_day(lab_id):
 
 
 @app.get("/admin/labs/<int:lab_id>/schedule/week")
-@auth_required(roles=["admin"])
+@auth_required(roles=["admin"], permissions=[PERMISSION_SCHEDULE_MANAGER])
 def admin_get_lab_schedule_week(lab_id):
     date_text = _parse_date_text(request.args.get("date"), "date", required=False) or datetime.now().strftime("%Y-%m-%d")
     anchor = datetime.strptime(date_text, "%Y-%m-%d").date()
