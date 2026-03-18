@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { MENU_ITEMS } from '@/utils/constants'
+import { isAllowedAccess } from '@/utils/auth'
 
 export const usePermissionStore = defineStore('permission', {
   state: () => ({
     sidebarCollapsed: false
   }),
   getters: {
-    menus: () => (role) => MENU_ITEMS.filter((item) => item.roles.includes(role))
+    menus: () => (user) => MENU_ITEMS.filter((item) => isAllowedAccess(user, item))
   },
   actions: {
     toggleSidebar(value) {

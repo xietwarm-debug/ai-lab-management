@@ -24,12 +24,24 @@ export function getUserAiPermissions(id) {
   return request.get(`/users/${id}/ai-permissions`)
 }
 
+export function getUserPermissions(id) {
+  return request.get(`/users/${id}/permissions`)
+}
+
 export function grantUserAiPermission(id, payload) {
   return request.post(`/users/${id}/ai-permissions/grant`, payload)
 }
 
+export function grantUserPermission(id, payload) {
+  return request.post(`/users/${id}/permissions/grant`, payload)
+}
+
 export function revokeUserAiPermission(id, payload) {
   return request.post(`/users/${id}/ai-permissions/revoke`, payload)
+}
+
+export function revokeUserPermission(id, payload) {
+  return request.post(`/users/${id}/permissions/revoke`, payload)
 }
 
 export function setUserRole(id, payload) {

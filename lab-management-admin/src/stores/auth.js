@@ -10,7 +10,8 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isLoggedIn: (state) => Boolean(state.user?.username),
     role: (state) => state.user?.role || '',
-    username: (state) => state.user?.username || ''
+    username: (state) => state.user?.username || '',
+    permissions: (state) => (Array.isArray(state.user?.permissions) ? state.user.permissions : [])
   },
   actions: {
     restore() {

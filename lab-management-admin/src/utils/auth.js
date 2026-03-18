@@ -23,10 +23,14 @@ export function getUserInfo() {
 export function saveSession(session = {}) {
   const token = String(session.token || '').trim()
   const refreshToken = String(session.refreshToken || '').trim()
+  const permissions = Array.isArray(session.permissions)
+    ? [...new Set(session.permissions.map((item) => String(item || '').trim()).filter(Boolean))]
+    : []
   const user = {
     userId: Number(session.userId || 0),
     username: String(session.username || '').trim(),
     role: String(session.role || '').trim(),
+    permissions,
     expiresIn: Number(session.expiresIn || 0)
   }
 
@@ -43,9 +47,22 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY)
 }
 
-export function isAllowedRole(role, roles = []) {
-  if (!Array.isArray(roles) || roles.length === 0) return true
-  return roles.includes(role)
+export function hasPermission(user, permission) {
+  const target = String(permission || '').trim()
+  if (!target) return true
+  const permissions = Array.isArray(user?.permissions) ? user.permissions : []
+  return permissions.includes(target)
+}
+
+export function isAllowedAccess(user, meta = {}) {
+  const roles = Array.isArray(meta?.roles) ? meta.roles : []
+  const permissions = Array.isArray(meta?.permissions) ? meta.permissions : []
+  if (roles.length === 0 && permissions.length === 0) return true
+  const roleMatched = roles.length > 0 ? roles.includes(String(user?.role || '').trim()) : false
+  const permissionMatched = permissions.length > 0
+    ? permissions.some((item) => hasPermission(user, item))
+    : false
+  return roleMatched || permissionMatched
 }
 
 export function getRoleLabel(role) {

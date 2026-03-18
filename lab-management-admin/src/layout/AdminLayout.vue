@@ -34,12 +34,12 @@ const router = useRouter()
 const authStore = useAuthStore()
 const permissionStore = usePermissionStore()
 
-const menus = computed(() => permissionStore.menus(authStore.role))
+const menus = computed(() => permissionStore.menus(authStore.user))
 const roleLabel = computed(() => getRoleLabel(authStore.role))
 const pageTitle = computed(() => String(route.meta?.title || '管理后台'))
-const pageSubtitle = computed(() => authStore.role === 'teacher'
-  ? '教师端只展示当前后端已开放的管理能力'
-  : '复用 lab-api 现有 Flask 接口的电脑端管理后台')
+const pageSubtitle = computed(() => (
+  authStore.role === 'teacher' ? '教师端仅展示当前后端已开放的管理能力' : ''
+))
 
 async function handleLogout() {
   try {
