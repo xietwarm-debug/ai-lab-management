@@ -206,6 +206,57 @@
           </el-descriptions>
 
           <section class="detail-section">
+            <div class="detail-section-head">
+              <h3>AI 权限</h3>
+              <el-button size="small" :loading="aiPermissionLoading" @click="refreshDetailAiPermissions">刷新</el-button>
+            </div>
+            <el-table :data="detailAiPermissionRows" size="small">
+              <el-table-column prop="permissionCode" label="权限码" min-width="220" />
+              <el-table-column label="状态" width="140">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="aiPermissionTagType(row)">{{ aiPermissionStatusLabel(row) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="来源" width="140">
+                <template #default="{ row }">
+                  {{ aiPermissionSourceLabel(row) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="过期时间" min-width="180">
+                <template #default="{ row }">
+                  {{ row.expiresAt || (row.granted ? '长期有效' : '-') }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    type="primary"
+                    :disabled="!canGrantAiPermission(detail?.user)"
+                    :loading="aiPermissionLoading"
+                    @click="handleGrantAiPermission(row.permissionCode)"
+                  >
+                    授权
+                  </el-button>
+                  <el-button
+                    link
+                    type="danger"
+                    :disabled="!canRevokeAiPermission(detail?.user, row)"
+                    :loading="aiPermissionLoading"
+                    @click="handleRevokeAiPermission(row.permissionCode)"
+                  >
+                    撤销
+                  </el-button>
+                </template>
+              </el-table-column>
+              <template #empty>
+                <el-empty description="暂无 AI 权限信息" :image-size="70" />
+              </template>
+            </el-table>
+            <p class="detail-tip">当前页面仅开放 `ai.reservation.view_owner` 的查看、授权与撤销。</p>
+          </section>
+
+          <section class="detail-section">
             <h3>汇总数据</h3>
             <div class="detail-summary-grid">
               <article class="summary-card">
@@ -471,17 +522,23 @@ import {
   createUser,
   deleteUser,
   freezeUser,
+  getUserAiPermissions,
   getUserDetail,
   getUserGovernanceStats,
   getUsers,
+  grantUserAiPermission,
   importUsers,
   resetUserPassword,
+  revokeUserAiPermission,
   setUserRole,
   unfreezeUser
 } from '@/api/users'
 
+const AI_RESERVATION_VIEW_OWNER = 'ai.reservation.view_owner'
+
 const loading = ref(false)
 const detailLoading = ref(false)
+const aiPermissionLoading = ref(false)
 const createLoading = ref(false)
 const batchPreviewLoading = ref(false)
 const batchSubmitLoading = ref(false)
@@ -608,6 +665,11 @@ const governanceCards = computed(() => [
   { label: '学生缺少班级', value: governanceStats.value.missingClassNameCount || 0, quickFilter: 'missing-class' },
   { label: '学生缺少毕业年份', value: governanceStats.value.missingGraduationYearCount || 0, quickFilter: 'missing-graduation' }
 ])
+
+const detailAiPermissionRows = computed(() => {
+  const items = Array.isArray(detail.value?.aiPermissions) ? detail.value.aiPermissions : []
+  return items.filter((item) => item.permissionCode === AI_RESERVATION_VIEW_OWNER)
+})
 
 function resetCreateForm() {
   createForm.role = 'student'
@@ -816,6 +878,110 @@ async function viewDetail(row) {
     detail.value = response.data?.data || null
   } finally {
     detailLoading.value = false
+  }
+}
+
+function aiPermissionStatusLabel(row) {
+  if (row?.granted) {
+    return row?.source === 'role_default' ? '默认拥有' : '已授权'
+  }
+  if (row?.source === 'expired') {
+    return '已过期'
+  }
+  return '未授权'
+}
+
+function aiPermissionTagType(row) {
+  if (row?.granted) return 'success'
+  if (row?.source === 'expired') return 'warning'
+  return 'info'
+}
+
+function aiPermissionSourceLabel(row) {
+  if (row?.source === 'role_default') return '角色默认'
+  if (row?.source === 'user_grant') return '管理员授权'
+  if (row?.source === 'expired') return '授权已过期'
+  return '未授权'
+}
+
+function canGrantAiPermission(user) {
+  const role = String(user?.role || '').trim()
+  return role === 'teacher' || role === 'student'
+}
+
+function canRevokeAiPermission(user, row) {
+  if (!canGrantAiPermission(user)) return false
+  return !!row?.granted || row?.source === 'expired'
+}
+
+async function refreshDetailAiPermissions() {
+  const userId = Number(detail.value?.user?.id || 0)
+  if (!userId) return
+  aiPermissionLoading.value = true
+  try {
+    const response = await getUserAiPermissions(userId)
+    const items = response.data?.data?.items || []
+    if (!detail.value) detail.value = {}
+    detail.value = {
+      ...detail.value,
+      aiPermissions: Array.isArray(items) ? items : []
+    }
+  } finally {
+    aiPermissionLoading.value = false
+  }
+}
+
+async function handleGrantAiPermission(permissionCode) {
+  const user = detail.value?.user || {}
+  if (!canGrantAiPermission(user)) {
+    ElMessage.warning('仅支持给教师或学生授权')
+    return
+  }
+  let promptResult
+  try {
+    promptResult = await ElMessageBox.prompt(
+      '可留空表示长期有效；如需设置过期时间，请输入 YYYY-MM-DD HH:mm:ss。',
+      '授权 AI 权限',
+      {
+        confirmButtonText: '授权',
+        cancelButtonText: '取消',
+        inputValue: '',
+        inputPlaceholder: '例如：2026-03-31 23:59:59',
+        inputPattern: /^$|^\d{4}-\d{2}-\d{2}(?:\s|T)\d{2}:\d{2}:\d{2}$/,
+        inputErrorMessage: '请输入 YYYY-MM-DD HH:mm:ss，或留空'
+      }
+    )
+  } catch (error) {
+    return
+  }
+  aiPermissionLoading.value = true
+  try {
+    const expiresAt = String(promptResult?.value || '').trim()
+    await grantUserAiPermission(user.id, {
+      permissionCode,
+      expiresAt: expiresAt || undefined
+    })
+    await refreshDetailAiPermissions()
+    ElMessage.success('AI 权限已授权')
+  } finally {
+    aiPermissionLoading.value = false
+  }
+}
+
+async function handleRevokeAiPermission(permissionCode) {
+  const user = detail.value?.user || {}
+  if (!canGrantAiPermission(user)) {
+    ElMessage.warning('仅支持撤销教师或学生的 AI 权限')
+    return
+  }
+  await ElMessageBox.confirm('确认撤销该用户的 AI 权限吗？', '撤销 AI 权限', { type: 'warning' })
+  aiPermissionLoading.value = true
+  try {
+    await revokeUserAiPermission(user.id, { permissionCode })
+    await refreshDetailAiPermissions()
+    ElMessage.success('AI 权限已撤销')
+  } finally {
+    aiPermissionLoading.value = false
   }
 }
 
@@ -1175,6 +1341,20 @@ onMounted(() => {
   margin: 0 0 12px;
 }
 
+.detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detail-tip {
+  margin: 12px 0 0;
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
 .dialog-actions {
   margin-bottom: 12px;
 }
@@ -1219,7 +1399,8 @@ onMounted(() => {
   .preview-head,
   .quick-filter-row,
   .quick-filter-hint,
-  .governance-toolbar {
+  .governance-toolbar,
+  .detail-section-head {
     flex-direction: column;
     align-items: flex-start;
   }

@@ -152,6 +152,14 @@ _RESERVATION_RULE_CACHE = {"expireAt": 0.0, "payload": None}
 AGENT_PENDING_TTL_SECONDS = max(60, env_int("AGENT_PENDING_TTL_SECONDS", 600))
 _AGENT_PENDING_LOCK = Lock()
 _AGENT_PENDING_CONTEXT = {}
+AI_PERMISSION_RESERVATION_CHECK_OCCUPANCY = "ai.reservation.check_occupancy"
+AI_PERMISSION_RESERVATION_VIEW_OWNER = "ai.reservation.view_owner"
+AI_PERMISSION_CODE_SET = {
+    AI_PERMISSION_RESERVATION_CHECK_OCCUPANCY,
+    AI_PERMISSION_RESERVATION_VIEW_OWNER,
+}
+RESERVATION_PRIVATE_VIEW_ROLE_SET = {"admin"}
+RESERVATION_ACTIVE_STATUS_SET = {"pending", "approved"}
 AGENT_TOOL_WHITELIST = {
     "reservation_summary",
     "repair_list",
@@ -548,6 +556,60 @@ def ensure_reservation_review_columns():
                 has_col = int((cur.fetchone() or {}).get("cnt") or 0) > 0
                 if not has_col:
                     cur.execute(f"ALTER TABLE reservation ADD COLUMN {col} {ddl}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_reservation_query_indexes():
+    conn = pymysql.connect(**DB)
+    try:
+        indexes = {
+            "idx_reservation_lab_date_status": "lab_name, date, status",
+            "idx_reservation_user_status": "user_name, status",
+        }
+        with conn.cursor() as cur:
+            for index_name, column_sql in indexes.items():
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA=%s
+                      AND TABLE_NAME='reservation'
+                      AND INDEX_NAME=%s
+                    """,
+                    (DB["database"], index_name),
+                )
+                has_index = int((cur.fetchone() or {}).get("cnt") or 0) > 0
+                if not has_index:
+                    cur.execute(f"ALTER TABLE reservation ADD INDEX {index_name} ({column_sql})")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ensure_ai_user_permission_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_user_permission (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    user_id BIGINT NOT NULL DEFAULT 0,
+                    username VARCHAR(64) NOT NULL DEFAULT '',
+                    permission_code VARCHAR(128) NOT NULL DEFAULT '',
+                    granted_by BIGINT NULL,
+                    granted_by_name VARCHAR(64) NOT NULL DEFAULT '',
+                    expires_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_ai_user_permission_user_code (user_id, permission_code),
+                    INDEX idx_ai_user_permission_username (username),
+                    INDEX idx_ai_user_permission_code_expires (permission_code, expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
         conn.commit()
     finally:
         conn.close()
@@ -5274,6 +5336,98 @@ def _to_text_time(value):
     return str(value or "")
 
 
+def _normalize_ai_permission_code(value):
+    code = str(value or "").strip()
+    if code not in AI_PERMISSION_CODE_SET:
+        raise BizError("invalid permissionCode", 400)
+    return code
+
+
+def _parse_ai_permission_expire_at(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidate = raw.replace("T", " ").strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1]
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        raise BizError("invalid expiresAt", 400)
+    if getattr(parsed, "tzinfo", None) is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def normalize_ai_permission_expires_at_text(value):
+    parsed = _parse_ai_permission_expire_at(value)
+    if parsed is None:
+        return ""
+    if parsed <= datetime.now():
+        raise BizError("expiresAt must be later than now", 400)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_ai_permission_status(current_user, permission_code):
+    code = _normalize_ai_permission_code(permission_code)
+    actor = current_user or {}
+    role = str(actor.get("role") or "").strip().lower()
+    user_id = _to_int_or_none(actor.get("id"))
+    username = str(actor.get("username") or "").strip()
+
+    base = {
+        "permissionCode": code,
+        "granted": False,
+        "source": "none",
+        "expiresAt": "",
+    }
+    if role == "admin":
+        base["granted"] = True
+        base["source"] = "role_default"
+        return base
+    if not user_id or not username:
+        return base
+
+    rows = query(
+        """
+        SELECT id,
+               permission_code AS permissionCode,
+               expires_at AS expiresAt
+        FROM ai_user_permission
+        WHERE user_id=%s
+          AND permission_code=%s
+        LIMIT 1
+        """,
+        (user_id, code),
+    )
+    if not rows:
+        return base
+
+    row = rows[0] or {}
+    expires_at_text = _to_text_time(row.get("expiresAt"))
+    expires_dt = _to_datetime(row.get("expiresAt"))
+    base["expiresAt"] = expires_at_text
+    if expires_dt != datetime.min and expires_dt <= datetime.now():
+        base["source"] = "expired"
+        return base
+
+    base["granted"] = True
+    base["source"] = "user_grant"
+    return base
+
+
+def has_ai_permission(current_user, permission_code):
+    return bool(get_ai_permission_status(current_user, permission_code).get("granted"))
+
+
+def list_user_ai_permission_statuses(target_user):
+    actor = target_user or {}
+    items = []
+    for code in sorted(AI_PERMISSION_CODE_SET):
+        items.append(get_ai_permission_status(actor, code))
+    return items
+
+
 def _normalize_notification_type(value):
     notice_type = str(value or "").strip()
     if notice_type not in NOTIFICATION_TYPE_SET:
@@ -6920,12 +7074,163 @@ def _reservation_status_label(status):
     return mapping.get(raw, raw or "未知状态")
 
 
+def can_view_reservation_private_fields(actor_role):
+    return str(actor_role or "").strip().lower() in RESERVATION_PRIVATE_VIEW_ROLE_SET
+
+
+def _reservation_identity_code_label(user_role):
+    return "学号" if str(user_role or "").strip().lower() == "student" else "工号"
+
+
+def _build_reservation_reserver_payload(row):
+    item = row or {}
+    user_name = str(item.get("user") or item.get("userName") or "").strip()
+    user_role = str(item.get("reserverRole") or item.get("userRole") or "").strip().lower()
+    display_name = str(item.get("reserverNickname") or item.get("nickname") or "").strip() or user_name
+    number_label = _reservation_identity_code_label(user_role)
+    number_value = str(item.get("studentNo") or "").strip() if number_label == "学号" else str(item.get("jobNo") or "").strip()
+    return {
+        "identityVisible": True,
+        "username": user_name,
+        "name": display_name,
+        "role": user_role,
+        "numberLabel": number_label,
+        "numberValue": number_value,
+    }
+
+
+def serialize_reservation_record_for_actor(row, actor=None, force_hide_private=False):
+    actor = actor or {}
+    actor_role = str(actor.get("role") or "").strip().lower()
+    actor_username = str(actor.get("username") or "").strip()
+    item = row or {}
+    reserver_username = str(item.get("user") or item.get("userName") or "").strip()
+    can_view_private = (not force_hide_private) and (
+        can_view_reservation_private_fields(actor_role) or (actor_username and actor_username == reserver_username)
+    )
+
+    payload = {
+        "id": int(item.get("id") or 0),
+        "labId": _to_int_or_none(item.get("labId")),
+        "labName": str(item.get("labName") or "").strip(),
+        "date": str(item.get("date") or "").strip(),
+        "time": str(item.get("time") or "").strip(),
+        "status": str(item.get("status") or "").strip(),
+        "rejectReason": str(item.get("rejectReason") or "").strip(),
+        "adminNote": str(item.get("adminNote") or "").strip(),
+        "reviewRole": str(item.get("reviewRole") or "").strip(),
+        "reviewPolicy": str(item.get("reviewPolicy") or "").strip(),
+        "createdAt": _to_text_time(item.get("createdAt")),
+        "identityVisible": bool(can_view_private),
+    }
+    if can_view_private:
+        payload["user"] = reserver_username
+        payload["reason"] = str(item.get("reason") or "").strip()
+        payload["reserver"] = _build_reservation_reserver_payload(item)
+    else:
+        payload["user"] = ""
+        payload["reason"] = ""
+        payload["reserver"] = {"identityVisible": False}
+        payload["identityHidden"] = True
+    return payload
+
+
+def query_reservation_slot_privacy_guarded(lab_name, date_text="", time_text="", actor=None, limit=12, allow_private=False):
+    actor = actor or {}
+    safe_lab_name = str(lab_name or "").strip()
+    safe_date = str(date_text or "").strip()
+    safe_time = str(time_text or "").strip()
+    target_slots = parse_slots(safe_time) if safe_time else set()
+    if safe_time and not target_slots:
+        raise BizError("invalid time", 400)
+
+    where_sql = " WHERE r.lab_name=%s "
+    params = [safe_lab_name]
+    if safe_date:
+        where_sql += " AND r.date=%s "
+        params.append(safe_date)
+
+    rows = query(
+        f"""
+        SELECT r.id,
+               r.lab_id AS labId,
+               r.lab_name AS labName,
+               r.user_name AS user,
+               r.date,
+               r.time,
+               r.reason,
+               r.status,
+               r.reject_reason AS rejectReason,
+               r.admin_note AS adminNote,
+               r.review_role AS reviewRole,
+               r.review_policy AS reviewPolicy,
+               r.created_at AS createdAt,
+               u.role AS reserverRole,
+               u.nickname AS reserverNickname,
+               u.student_no AS studentNo,
+               u.job_no AS jobNo
+        FROM reservation r
+        LEFT JOIN user u ON u.username=r.user_name
+        {where_sql}
+        ORDER BY r.date DESC, r.id DESC
+        LIMIT %s
+        """,
+        tuple(params + [max(1, int(limit))]),
+    )
+
+    filtered = []
+    active_rows = []
+    for row in rows:
+        if target_slots:
+            row_slots = parse_slots(row.get("time"))
+            if not row_slots or not (target_slots & row_slots):
+                continue
+        filtered.append(row)
+        if str((row or {}).get("status") or "").strip().lower() in RESERVATION_ACTIVE_STATUS_SET:
+            active_rows.append(row)
+
+    is_slot_query = bool(safe_date and target_slots)
+    matched_rows = active_rows if is_slot_query else filtered
+    identity_visible = bool(allow_private)
+    items = [
+        serialize_reservation_record_for_actor(row, actor=actor, force_hide_private=not identity_visible)
+        for row in matched_rows[: max(1, int(limit))]
+    ]
+
+    status_summary = {}
+    for row in matched_rows:
+        key = str((row or {}).get("status") or "").strip().lower()
+        if not key:
+            continue
+        status_summary[key] = int(status_summary.get(key) or 0) + 1
+
+    return {
+        "slot": {"labName": safe_lab_name, "date": safe_date, "time": safe_time},
+        "isSlotQuery": bool(is_slot_query),
+        "booked": bool(active_rows),
+        "identityVisible": bool(identity_visible),
+        "identityRestricted": bool(active_rows) and not identity_visible,
+        "count": len(matched_rows),
+        "activeCount": len(active_rows),
+        "statusSummary": status_summary,
+        "items": items,
+    }
+
+
+def _is_reservation_identity_query(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    identity_tokens = ("谁预约", "谁预定", "预约人", "预定人", "谁占用", "姓名", "学号", "工号", "原因", "用途")
+    return any(token in raw for token in identity_tokens)
+
+
 def _is_lab_reservations_query(text):
     raw = str(text or "").strip()
     if not raw:
         return False
     has_reserve_word = any(x in raw for x in ("预约", "预定"))
-    has_query_word = any(x in raw for x in ("检查", "查看", "查询", "检索", "统计", "记录", "列表", "所有"))
+    has_query_word = any(x in raw for x in ("检查", "查看", "查询", "检索", "统计", "记录", "列表", "所有", "谁", "是谁", "占用"))
     has_lab_word = any(x in raw for x in ("实验室", "机房", "教室"))
     has_lab_code = bool(re.search(r"(?<![A-Za-z0-9])[A-Za-z]{1,2}\s*\d{3,4}(?![A-Za-z0-9])", raw))
     if not has_reserve_word or not has_query_word:
@@ -7285,53 +7590,106 @@ def _agent_handle_lab_reservations_query(user_name, role, lab_name, date_text=""
     except BizError as e:
         return _agent_response(code=e.status, msg=e.msg, reply=f"实验室信息有问题：{e.msg}", action="ask_info", http_status=e.status)
 
-    where_sql = " WHERE lab_name=%s "
-    params = [str(lab.get("name") or "")]
-    is_admin = str(role or "").strip() == "admin"
-    if not is_admin:
-        where_sql += " AND user_name=%s "
-        params.append(owner)
-    if str(date_text or "").strip():
-        where_sql += " AND date=%s "
-        params.append(str(date_text or "").strip())
-
-    rows = query(
-        f"""
-        SELECT id, lab_name AS labName, user_name AS user, date, time, status, reason
-        FROM reservation
-        {where_sql}
-        ORDER BY date DESC, id DESC
-        LIMIT %s
-        """,
-        tuple(params + [max(1, int(limit))]),
-    )
-
     target_slots = parse_slots(time_text) if str(time_text or "").strip() else set()
     if str(time_text or "").strip() and not target_slots:
         return _agent_response(code=0, msg="ok", reply="时段格式不正确，请用例如 1-2节 或 08:00-08:40,08:45-09:35。", action="ask_info", http_status=200)
 
-    filtered = []
-    for row in rows:
-        if target_slots:
-            row_slots = parse_slots(row.get("time"))
-            if not row_slots or not (target_slots & row_slots):
-                continue
-        filtered.append(row)
+    actor = {"id": getattr(g, "current_user", {}).get("id"), "username": owner, "role": role}
+    permission_status = get_ai_permission_status(actor, AI_PERMISSION_RESERVATION_VIEW_OWNER)
+    can_view_owner = bool(permission_status.get("granted"))
+    result = query_reservation_slot_privacy_guarded(
+        lab_name=str(lab.get("name") or "").strip(),
+        date_text=str(date_text or "").strip(),
+        time_text=str(time_text or "").strip(),
+        actor=actor,
+        limit=max(1, int(limit)),
+        allow_private=can_view_owner,
+    )
+    audit_log(
+        "agent.reservation.slot_query",
+        target_type="reservation",
+        detail={
+            "labName": result.get("slot", {}).get("labName"),
+            "date": result.get("slot", {}).get("date"),
+            "time": result.get("slot", {}).get("time"),
+            "booked": bool(result.get("booked")),
+            "identityVisible": bool(result.get("identityVisible")),
+            "identityRequested": bool(result.get("isSlotQuery")) or _is_reservation_identity_query(str(lab_name or "")),
+            "permissionCode": AI_PERMISSION_RESERVATION_VIEW_OWNER,
+            "permissionGranted": can_view_owner,
+            "permissionSource": str(permission_status.get("source") or ""),
+            "permissionExpiresAt": str(permission_status.get("expiresAt") or ""),
+            "count": int(result.get("count") or 0),
+            "activeCount": int(result.get("activeCount") or 0),
+        },
+        actor=actor,
+    )
 
-    if not filtered:
-        if is_admin:
-            reply = f"{lab.get('name')} 当前没有匹配的预约记录。"
-        else:
-            reply = f"{lab.get('name')} 当前没有你名下的匹配预约记录。"
-        return _agent_response(code=0, msg="ok", reply=reply, action="lab_reservation_list", http_status=200)
+    slot_info = result.get("slot") if isinstance(result.get("slot"), dict) else {}
+    safe_lab_name = str(slot_info.get("labName") or lab.get("name") or "").strip()
+    safe_date = str(slot_info.get("date") or "").strip()
+    safe_time = str(slot_info.get("time") or "").strip()
+    can_view_private = bool(result.get("identityVisible"))
+    is_slot_query = bool(result.get("isSlotQuery"))
+    items = result.get("items") if isinstance(result.get("items"), list) else []
 
-    status_counter = {}
-    for row in filtered:
-        key = str((row or {}).get("status") or "").strip()
-        if not key:
-            continue
-        status_counter[key] = int(status_counter.get(key) or 0) + 1
+    if is_slot_query:
+        if not bool(result.get("booked")):
+            reply = f"{safe_lab_name} {safe_date} {safe_time} 该时段未被预约。".strip()
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply,
+                action="lab_reservation_list",
+                extra={"reservationQuery": result},
+                http_status=200,
+            )
+        if not can_view_private:
+            reply = f"{safe_lab_name} {safe_date} {safe_time} 该时段已被预约，你无权查看预约人信息。".strip()
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply,
+                action="lab_reservation_list",
+                extra={"reservationQuery": result},
+                http_status=200,
+            )
 
+        row = items[0] if items else {}
+        reserver = row.get("reserver") if isinstance(row.get("reserver"), dict) else {}
+        name_text = str(reserver.get("name") or row.get("user") or "").strip() or "未署名用户"
+        number_label = str(reserver.get("numberLabel") or "").strip()
+        number_value = str(reserver.get("numberValue") or "").strip()
+        reason_text = str(row.get("reason") or "").strip()
+        status_text = _reservation_status_label(row.get("status"))
+        bits = [f"{safe_lab_name} {safe_date} {safe_time} 该时段已被预约。", f"预约人：{name_text}"]
+        if number_label and number_value:
+            bits.append(f"{number_label}：{number_value}")
+        if reason_text:
+            bits.append(f"用途：{reason_text}")
+        bits.append(f"状态：{status_text}")
+        reply = "，".join(bits) + "。"
+        return _agent_response(
+            code=0,
+            msg="ok",
+            reply=reply,
+            action="lab_reservation_list",
+            extra={"reservationQuery": result},
+            http_status=200,
+        )
+
+    if not items:
+        reply = f"{safe_lab_name} 当前没有匹配的预约记录。"
+        return _agent_response(
+            code=0,
+            msg="ok",
+            reply=reply,
+            action="lab_reservation_list",
+            extra={"reservationQuery": result},
+            http_status=200,
+        )
+
+    status_counter = result.get("statusSummary") if isinstance(result.get("statusSummary"), dict) else {}
     ordered_status = ["pending", "approved", "rejected", "cancelled"]
     status_parts = []
     for key in ordered_status:
@@ -7346,23 +7704,52 @@ def _agent_handle_lab_reservations_query(user_name, role, lab_name, date_text=""
             status_parts.append(f"{key}{n}条")
     status_text = "，".join(status_parts) if status_parts else "暂无状态统计"
 
-    lines = []
-    for idx, row in enumerate(filtered[:10], start=1):
-        rid = int((row or {}).get("id") or 0)
-        user_text = str((row or {}).get("user") or "").strip()
-        date_row = str((row or {}).get("date") or "").strip()
-        time_row = str((row or {}).get("time") or "").strip()
-        status_row = _reservation_status_label((row or {}).get("status"))
-        if is_admin:
-            lines.append(f"{idx}. #{rid} {date_row} {time_row}（{status_row}，用户：{user_text}）")
+    if not can_view_private:
+        summary_bits = [f"{safe_lab_name} 匹配预约共{int(result.get('count') or 0)}条"]
+        if safe_date:
+            summary_bits.append(f"日期：{safe_date}")
+        if safe_time:
+            summary_bits.append(f"时段：{safe_time}")
+        if bool(result.get("booked")):
+            summary_bits.append("当前存在已预约时段")
         else:
-            lines.append(f"{idx}. #{rid} {date_row} {time_row}（{status_row}）")
+            summary_bits.append("当前没有已预约时段")
+        summary_bits.append("无权查看预约人信息")
+        reply = "，".join(summary_bits) + "。"
+        return _agent_response(
+            code=0,
+            msg="ok",
+            reply=reply,
+            action="lab_reservation_list",
+            extra={"reservationQuery": result},
+            http_status=200,
+        )
 
-    header = f"{lab.get('name')} 预约记录共{len(filtered)}条，状态分布：{status_text}。"
-    if not is_admin:
-        header += "（当前账号仅显示你自己的预约）"
+    lines = []
+    for idx, row in enumerate(items[:10], start=1):
+        reserver = row.get("reserver") if isinstance(row.get("reserver"), dict) else {}
+        name_text = str(reserver.get("name") or row.get("user") or "").strip() or "未署名用户"
+        number_label = str(reserver.get("numberLabel") or "").strip()
+        number_value = str(reserver.get("numberValue") or "").strip()
+        reason_text = str(row.get("reason") or "").strip()
+        detail_bits = [f"{idx}. #{int(row.get('id') or 0)} {row.get('date') or ''} {row.get('time') or ''}（{_reservation_status_label(row.get('status'))}"]
+        detail_tail = [f"预约人：{name_text}"]
+        if number_label and number_value:
+            detail_tail.append(f"{number_label}：{number_value}")
+        if reason_text:
+            detail_tail.append(f"用途：{reason_text}")
+        lines.append(detail_bits[0] + "，" + "，".join(detail_tail) + "）")
+
+    header = f"{safe_lab_name} 预约记录共{int(result.get('count') or 0)}条，状态分布：{status_text}。"
     reply = header + "\n最近记录：\n" + "\n".join(lines)
-    return _agent_response(code=0, msg="ok", reply=reply, action="lab_reservation_list", http_status=200)
+    return _agent_response(
+        code=0,
+        msg="ok",
+        reply=reply,
+        action="lab_reservation_list",
+        extra={"reservationQuery": result},
+        http_status=200,
+    )
 
 
 def _agent_handle_cancel_reservations(user_name, role, reservation_id=None, lab_name="", date_text="", time_text="", confirmed=False, target_ids=None):
@@ -10721,6 +11108,16 @@ try:
     ensure_reservation_review_columns()
 except Exception as e:
     print(f"[warn] ensure_reservation_review_columns failed: {e}")
+
+try:
+    ensure_reservation_query_indexes()
+except Exception as e:
+    print(f"[warn] ensure_reservation_query_indexes failed: {e}")
+
+try:
+    ensure_ai_user_permission_table()
+except Exception as e:
+    print(f"[warn] ensure_ai_user_permission_table failed: {e}")
 
 try:
     ensure_announcement_table()

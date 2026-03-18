@@ -20,6 +20,18 @@ export function getUserDetail(id, params) {
   return request.get(`/users/${id}/detail`, { params })
 }
 
+export function getUserAiPermissions(id) {
+  return request.get(`/users/${id}/ai-permissions`)
+}
+
+export function grantUserAiPermission(id, payload) {
+  return request.post(`/users/${id}/ai-permissions/grant`, payload)
+}
+
+export function revokeUserAiPermission(id, payload) {
+  return request.post(`/users/${id}/ai-permissions/revoke`, payload)
+}
+
 export function setUserRole(id, payload) {
   return request.post(`/users/${id}/set-role`, payload)
 }

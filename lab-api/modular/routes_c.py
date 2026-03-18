@@ -541,7 +541,7 @@ def list_reservations():
     date_to = request.args.get("dateTo", "").strip()
     page_raw = request.args.get("page", "").strip()
     page_size_raw = request.args.get("pageSize", "").strip()
-    current_user = g.current_user
+    current_user = g.current_user or {}
     current_username = str(current_user.get("username") or "").strip()
     current_role = str(current_user.get("role") or "").strip().lower()
     is_admin = current_role == "admin"
@@ -617,23 +617,30 @@ def list_reservations():
         where_sql += " AND review_role='teacher'"
 
     base_sql = """
-        SELECT id,
-               lab_name AS labName,
-               user_name AS user,
-               date,
-               time,
-               reason,
-               status,
-               reject_reason AS rejectReason,
-               admin_note AS adminNote,
-               review_role AS reviewRole,
-               review_policy AS reviewPolicy,
-               created_at AS createdAt
-        FROM reservation
+        SELECT r.id,
+               r.lab_id AS labId,
+               r.lab_name AS labName,
+               r.user_name AS user,
+               r.date,
+               r.time,
+               r.reason,
+               r.status,
+               r.reject_reason AS rejectReason,
+               r.admin_note AS adminNote,
+               r.review_role AS reviewRole,
+               r.review_policy AS reviewPolicy,
+               r.created_at AS createdAt,
+               u.role AS reserverRole,
+               u.nickname AS reserverNickname,
+               u.student_no AS studentNo,
+               u.job_no AS jobNo
+        FROM reservation r
+        LEFT JOIN user u ON u.username=r.user_name
     """
 
     if not use_pagination:
         rows = query(base_sql + where_sql + " ORDER BY id DESC", params)
+        rows = [serialize_reservation_record_for_actor(row, actor=current_user) for row in rows]
         return jsonify(rows)
 
     try:
@@ -654,6 +661,7 @@ def list_reservations():
     list_sql = base_sql + where_sql + " ORDER BY id DESC LIMIT %s OFFSET %s"
     list_params = list(params) + [page_size, offset]
     rows = query(list_sql, list_params)
+    rows = [serialize_reservation_record_for_actor(row, actor=current_user) for row in rows]
 
     return jsonify(
         {
@@ -674,32 +682,37 @@ def list_reservations():
 def get_reservation(rid):
     row = query(
         """
-        SELECT id,
-               lab_id AS labId,
-               lab_name AS labName,
-               user_name AS user,
-               date,
-               time,
-               reason,
-               status,
-               reject_reason AS rejectReason,
-               admin_note AS adminNote,
-               review_role AS reviewRole,
-               review_policy AS reviewPolicy,
-               created_at AS createdAt
-        FROM reservation
-        WHERE id=%s
+        SELECT r.id,
+               r.lab_id AS labId,
+               r.lab_name AS labName,
+               r.user_name AS user,
+               r.date,
+               r.time,
+               r.reason,
+               r.status,
+               r.reject_reason AS rejectReason,
+               r.admin_note AS adminNote,
+               r.review_role AS reviewRole,
+               r.review_policy AS reviewPolicy,
+               r.created_at AS createdAt,
+               u.role AS reserverRole,
+               u.nickname AS reserverNickname,
+               u.student_no AS studentNo,
+               u.job_no AS jobNo
+        FROM reservation r
+        LEFT JOIN user u ON u.username=r.user_name
+        WHERE r.id=%s
         LIMIT 1
         """,
         (rid,),
     )
     if not row:
         return jsonify({"ok": False, "msg": "reservation not found"}), 404
-    current_user = g.current_user
+    current_user = g.current_user or {}
     role = str(current_user.get("role") or "").strip().lower()
-    if role not in {"admin", "teacher"} and row[0].get("user") != current_user.get("username"):
+    if role != "admin" and row[0].get("user") != current_user.get("username"):
         return jsonify({"ok": False, "msg": "forbidden"}), 403
-    return jsonify({"ok": True, "data": row[0]})
+    return jsonify({"ok": True, "data": serialize_reservation_record_for_actor(row[0], actor=current_user)})
 
 
 def _reservation_user_violation_count(user_name):
@@ -859,7 +872,7 @@ def _build_reservation_ai_suggestion_payload(reservation_row):
 
 
 @app.get("/reservations/<int:rid>/ai-suggestion")
-@auth_required(roles=["admin", "teacher"])
+@auth_required(roles=["admin"])
 def get_reservation_ai_suggestion(rid):
     rows = query(
         """

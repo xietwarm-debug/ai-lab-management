@@ -374,6 +374,15 @@ def _query_admin_user_row(uid):
     return rows[0] if rows else None
 
 
+def _assert_ai_permission_grant_target(target_row):
+    target = target_row or {}
+    role = str(target.get("role") or "").strip().lower()
+    if role == "admin":
+        raise BizError("admin already has all ai permissions", 409)
+    if role not in {"teacher", "student"}:
+        raise BizError("only teacher or student can be granted ai permission", 400)
+
+
 def _assert_user_editable(target_row, current_user, block_self=True):
     target = target_row or {}
     actor = current_user or {}
@@ -2083,6 +2092,13 @@ def get_user_detail(uid):
 
     payload = {
         "user": _format_user_admin_row(user_row),
+        "aiPermissions": list_user_ai_permission_statuses(
+            {
+                "id": user_row.get("id"),
+                "username": user_row.get("username"),
+                "role": user_row.get("role"),
+            }
+        ),
         "summary": {
             "reservationTotal": int((reservation_count_rows[0] or {}).get("cnt") or 0) if reservation_count_rows else 0,
             "repairTotal": int((repair_count_rows[0] or {}).get("cnt") or 0) if repair_count_rows else 0,
@@ -2102,6 +2118,151 @@ def get_user_detail(uid):
         "violationRecords": violation_records[: max(detail_limit, 20)],
     }
     return jsonify({"ok": True, "data": payload})
+
+
+@app.get("/users/<int:uid>/ai-permissions")
+@auth_required(roles=["admin"])
+def get_user_ai_permissions(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    items = list_user_ai_permission_statuses(
+        {
+            "id": target.get("id"),
+            "username": target.get("username"),
+            "role": target.get("role"),
+        }
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "user": {
+                    "id": int(target.get("id") or 0),
+                    "username": str(target.get("username") or "").strip(),
+                    "role": str(target.get("role") or "").strip(),
+                },
+                "items": items,
+            },
+        }
+    )
+
+
+@app.post("/users/<int:uid>/ai-permissions/grant")
+@auth_required(roles=["admin"])
+def grant_user_ai_permission(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    _assert_ai_permission_grant_target(target)
+
+    payload = request.get_json(force=True) or {}
+    permission_code = _normalize_ai_permission_code(payload.get("permissionCode"))
+    expires_at_text = normalize_ai_permission_expires_at_text(payload.get("expiresAt"))
+    actor = g.current_user or {}
+
+    def _tx(cur):
+        cur.execute(
+            """
+            INSERT INTO ai_user_permission (
+                user_id, username, permission_code, granted_by, granted_by_name, expires_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                username=VALUES(username),
+                granted_by=VALUES(granted_by),
+                granted_by_name=VALUES(granted_by_name),
+                expires_at=VALUES(expires_at)
+            """,
+            (
+                int(target.get("id") or 0),
+                str(target.get("username") or "").strip(),
+                permission_code,
+                _to_int_or_none(actor.get("id")),
+                str(actor.get("username") or "").strip(),
+                expires_at_text or None,
+            ),
+        )
+
+    run_in_transaction(_tx)
+    status = get_ai_permission_status(
+        {
+            "id": target.get("id"),
+            "username": target.get("username"),
+            "role": target.get("role"),
+        },
+        permission_code,
+    )
+    audit_log(
+        "admin.ai_permission.grant",
+        target_type="ai_user_permission",
+        target_id=f"{int(target.get('id') or 0)}:{permission_code}",
+        detail={
+            "targetUserId": int(target.get("id") or 0),
+            "targetUsername": str(target.get("username") or "").strip(),
+            "targetRole": str(target.get("role") or "").strip(),
+            "permissionCode": permission_code,
+            "expiresAt": expires_at_text,
+        },
+        actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "userId": int(target.get("id") or 0),
+                "permission": status,
+            },
+        }
+    )
+
+
+@app.post("/users/<int:uid>/ai-permissions/revoke")
+@auth_required(roles=["admin"])
+def revoke_user_ai_permission(uid):
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    _assert_ai_permission_grant_target(target)
+
+    payload = request.get_json(force=True) or {}
+    permission_code = _normalize_ai_permission_code(payload.get("permissionCode"))
+    actor = g.current_user or {}
+
+    def _tx(cur):
+        cur.execute(
+            """
+            DELETE FROM ai_user_permission
+            WHERE user_id=%s
+              AND permission_code=%s
+            """,
+            (int(target.get("id") or 0), permission_code),
+        )
+        return int(cur.rowcount or 0)
+
+    changed = int(run_in_transaction(_tx) or 0) > 0
+    audit_log(
+        "admin.ai_permission.revoke",
+        target_type="ai_user_permission",
+        target_id=f"{int(target.get('id') or 0)}:{permission_code}",
+        detail={
+            "targetUserId": int(target.get("id") or 0),
+            "targetUsername": str(target.get("username") or "").strip(),
+            "targetRole": str(target.get("role") or "").strip(),
+            "permissionCode": permission_code,
+            "changed": changed,
+        },
+        actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "userId": int(target.get("id") or 0),
+                "permissionCode": permission_code,
+                "changed": changed,
+            },
+        }
+    )
 
 
 @app.get("/admin/todo-center")
