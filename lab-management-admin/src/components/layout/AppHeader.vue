@@ -51,9 +51,11 @@ defineEmits(['toggle-sidebar', 'logout'])
   justify-content: space-between;
   gap: 16px;
   padding: 18px 24px;
-  border-bottom: 1px solid var(--app-border);
+  border-bottom: none;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  z-index: 10;
 }
 
 .header-left,
@@ -70,11 +72,13 @@ defineEmits(['toggle-sidebar', 'logout'])
 
 .header-copy strong {
   font-size: 18px;
+  color: #09090b;
+  font-weight: 700;
 }
 
 .header-copy span {
   font-size: 13px;
-  color: var(--app-muted);
+  color: #71717a;
 }
 
 .user-chip {
@@ -82,12 +86,13 @@ defineEmits(['toggle-sidebar', 'logout'])
   flex-direction: column;
   padding: 8px 12px;
   border-radius: 12px;
-  background: var(--app-primary-soft);
+  background: #eff6ff;
 }
 
 .user-chip em {
   font-style: normal;
   font-size: 12px;
-  color: #115e59;
+  color: #2563eb;
+  font-weight: 600;
 }
 </style>

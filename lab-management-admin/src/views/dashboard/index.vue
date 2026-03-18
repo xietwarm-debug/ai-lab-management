@@ -376,17 +376,17 @@ onMounted(() => {
 
 <style scoped lang="scss">
 :root {
-  --app-primary: #115e59;
-  --app-primary-light: #f0fdfa;
-  --app-primary-accent: #0d9488;
-  --app-text-main: #1e293b;
-  --app-text-sub: #475569;
-  --app-text-muted: #94a3b8;
+  --app-primary: #2563eb;
+  --app-primary-light: #eff6ff;
+  --app-primary-accent: #3b82f6;
+  --app-text-main: #09090b;
+  --app-text-sub: #71717a;
+  --app-text-muted: #a1a1aa;
   --app-bg: #f8fafc;
   --app-surface: #ffffff;
-  --app-border: #e2e8f0;
-  --app-shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.03);
-  --app-shadow-hover: 0 12px 24px rgba(0, 0, 0, 0.06);
+  --app-border: #f1f5f9;
+  --app-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.05);
+  --app-shadow-hover: 0 16px 40px rgba(0, 0, 0, 0.08);
 }
 
 .dashboard-page {
@@ -418,8 +418,8 @@ onMounted(() => {
 .hero-card {
   position: relative;
   border-radius: 20px;
-  background: linear-gradient(135deg, #ffffff 0%, #f0fdfa 100%);
-  border: 1px solid var(--app-border);
+  background: #ffffff;
+  border: none;
   padding: 32px;
   box-shadow: var(--app-shadow-soft);
   overflow: hidden;
@@ -434,7 +434,7 @@ onMounted(() => {
     right: -10%;
     width: 300px;
     height: 300px;
-    background: radial-gradient(circle, rgba(20, 184, 166, 0.08) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
     border-radius: 50%;
   }
 }
@@ -449,8 +449,8 @@ onMounted(() => {
 .eyebrow-tag {
   display: inline-block;
   padding: 4px 12px;
-  background: #ccfbf1;
-  color: #115e59;
+  background: #dbeafe;
+  color: #1d4ed8;
   border-radius: 20px;
   font-size: 13px;
   font-weight: 600;
@@ -460,6 +460,7 @@ onMounted(() => {
 .hero-title {
   margin: 0 0 8px 0;
   font-size: 28px;
+  font-weight: 700;
   color: var(--app-text-main);
   letter-spacing: -0.5px;
 }
@@ -484,7 +485,7 @@ onMounted(() => {
     font-size: 14px;
     
     .el-icon {
-      color: #0d9488;
+      color: #3b82f6;
     }
   }
 }
@@ -497,10 +498,10 @@ onMounted(() => {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   
   &:hover {
-    color: #115e59;
-    border-color: #115e59;
+    color: #2563eb;
+    border-color: #2563eb;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(17, 94, 89, 0.1);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
   }
 }
 
@@ -513,7 +514,7 @@ onMounted(() => {
 
 .metric-card {
   background: white;
-  border: 1px solid var(--app-border);
+  border: none;
   border-radius: 20px;
   padding: 24px;
   display: flex;
@@ -528,11 +529,10 @@ onMounted(() => {
   &:hover {
     transform: translateY(-6px);
     box-shadow: var(--app-shadow-hover);
-    border-color: #115e59;
 
     .metric-icon-wrap {
-      background: #ccfbf1;
-      color: #115e59;
+      background: #eff6ff;
+      color: #2563eb;
     }
   }
 }
@@ -597,7 +597,7 @@ onMounted(() => {
 .panel-card {
   background: white;
   border-radius: 20px;
-  border: 1px solid var(--app-border);
+  border: none;
   box-shadow: var(--app-shadow-soft);
   padding: 24px;
 }
@@ -612,15 +612,16 @@ onMounted(() => {
     
     .head-icon {
       padding: 8px;
-      background: #f0fdfa;
+      background: #eff6ff;
       border-radius: 10px;
-      color: #0d9488;
+      color: #3b82f6;
       font-size: 18px;
     }
     
     h3 {
       margin: 0;
       font-size: 18px;
+      font-weight: 700;
       color: var(--app-text-main);
     }
     
@@ -666,7 +667,7 @@ onMounted(() => {
 .trend-bar {
   width: 100%;
   max-width: 18px;
-  background: linear-gradient(180deg, #115e59 0%, #2dd4bf 100%);
+  background: linear-gradient(180deg, #2563eb 0%, #60a5fa 100%);
   border-radius: 10px 10px 0 0;
   transition: height 0.8s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
@@ -722,7 +723,7 @@ onMounted(() => {
     color: var(--app-text-main);
     font-size: 16px;
     
-    &.highlight { color: #0d9488; }
+    &.highlight { color: #2563eb; }
     &.warning { color: #f59e0b; }
     &.danger { color: #ef4444; }
   }
@@ -813,7 +814,7 @@ onMounted(() => {
 
 .stack-fill {
   height: 100%;
-  background: linear-gradient(90deg, #115e59 0%, #2dd4bf 100%);
+  background: linear-gradient(90deg, #2563eb 0%, #60a5fa 100%);
   border-radius: 10px;
   transition: width 1s ease-out;
 }

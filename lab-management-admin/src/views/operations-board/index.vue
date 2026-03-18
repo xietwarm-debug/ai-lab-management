@@ -210,13 +210,17 @@ onMounted(() => {
 .hero-card,
 .metric-card,
 .panel-card {
-  border-radius: 30px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  border: none;
+  background: white;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+}
+
+.hero-card {
   background:
-    radial-gradient(circle at top left, rgba(14, 116, 144, 0.15), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(217, 119, 6, 0.1), transparent 28%),
-    linear-gradient(180deg, #f9fcff, #f3f6fb);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.05), transparent 28%),
+    linear-gradient(180deg, #ffffff, #f8fafc);
 }
 
 .hero-card,
@@ -285,22 +289,16 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.metric-card.warn {
-  background:
-    radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 30%),
-    linear-gradient(180deg, #fffaf0, #fff7e6);
+.metric-card.warn .metric-value {
+  color: #f59e0b;
 }
 
-.metric-card.accent {
-  background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.18), transparent 30%),
-    linear-gradient(180deg, #f4f8ff, #eef4ff);
+.metric-card.accent .metric-value {
+  color: #3b82f6;
 }
 
-.metric-card.danger {
-  background:
-    radial-gradient(circle at top left, rgba(220, 38, 38, 0.16), transparent 30%),
-    linear-gradient(180deg, #fff6f6, #fff0f0);
+.metric-card.danger .metric-value {
+  color: #ef4444;
 }
 
 .panel-grid {
@@ -324,8 +322,10 @@ onMounted(() => {
 .trend-col {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  height: 100%;
 }
 
 .trend-bars {
@@ -344,7 +344,7 @@ onMounted(() => {
 }
 
 .bar.reservation {
-  background: linear-gradient(180deg, #0ea5e9, #2563eb);
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
 }
 
 .bar.alarm {
@@ -363,9 +363,10 @@ onMounted(() => {
 
 .trend-meta {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
 }
 
 .risk-list,
@@ -379,11 +380,23 @@ onMounted(() => {
 .risk-item {
   width: 100%;
   padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.86);
+  border: none;
+  border-radius: 12px;
+  background: var(--app-bg);
   text-align: left;
   cursor: pointer;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: #f1f5f9;
+  }
+}
+
+:deep(.el-tag--danger) {
+  background-color: #fee2e2 !important;
+  color: #dc2626 !important;
+  border-color: #fca5a5 !important;
+  font-weight: 600;
 }
 
 .risk-item p {
@@ -415,7 +428,7 @@ onMounted(() => {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #14b8a6, #0f766e);
+  background: linear-gradient(90deg, #3b82f6, #1d4ed8);
 }
 
 .usage-side {

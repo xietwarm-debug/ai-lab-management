@@ -31,9 +31,10 @@ defineProps({
   height: 40px;
   place-items: center;
   border-radius: 12px;
-  background: linear-gradient(135deg, #0f766e 0%, #14532d 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   color: #fff;
   font-weight: 700;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.2);
 }
 
 .logo-copy {
@@ -44,10 +45,11 @@ defineProps({
 
 .logo-copy strong {
   font-size: 14px;
+  color: #ffffff;
 }
 
 .logo-copy span {
-  color: var(--app-muted);
+  color: rgba(255, 255, 255, 0.7);
   font-size: 12px;
 }
 </style>
