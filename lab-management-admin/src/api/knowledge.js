@@ -12,6 +12,15 @@ export function createKnowledgeDocument(payload = {}) {
   return request.post('/admin/knowledge/documents', payload)
 }
 
+export function uploadKnowledgeDocument(formData) {
+  return request.post('/admin/knowledge/documents/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 60000
+  })
+}
+
 export function updateKnowledgeDocument(id, payload = {}) {
   return request.post(`/admin/knowledge/documents/${id}`, payload)
 }
@@ -34,4 +43,16 @@ export function submitKnowledgeFeedback(payload = {}) {
 
 export function getKnowledgeFeedbackList(params = {}) {
   return request.get('/admin/knowledge/feedback', { params })
+}
+
+export function getUnmatchedKnowledgeQuestions(params = {}) {
+  return request.get('/admin/knowledge/unmatched-questions', { params })
+}
+
+export function getUnmatchedKnowledgeQuestionDetail(groupKey) {
+  return request.get(`/admin/knowledge/unmatched-questions/${groupKey}`)
+}
+
+export function updateUnmatchedKnowledgeQuestionStatus(payload = {}) {
+  return request.post('/admin/knowledge/unmatched-questions/status', payload)
 }

@@ -4,7 +4,7 @@
       <div>
         <span class="eyebrow">资产生命周期</span>
         <h2>资产管理工作台</h2>
-        <p>补齐采购入库、维保计划、维修历史、二维码打印、责任人变更和折旧报废。</p>
+        <p>围绕采购入库、维修保养、责任流转、资产编码与报废处理，统一管理设备全生命周期。</p>
       </div>
       <div class="hero-actions">
         <el-button @click="refreshAll">刷新</el-button>
@@ -20,12 +20,17 @@
     </section>
 
     <section class="panel-card">
-      <el-form inline>
-        <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="资产编号 / 名称 / 实验室 / 责任人" clearable @keyup.enter="handleSearch" />
+      <el-form inline class="filters-form">
+        <el-form-item label="关键字">
+          <el-input
+            v-model="filters.keyword"
+            placeholder="资产编号 / 名称 / 品牌 / 型号 / 实验室 / 责任人"
+            clearable
+            @keyup.enter="handleSearch"
+          />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filters.status" style="width: 160px">
+          <el-select v-model="filters.status" style="width: 160px" clearable>
             <el-option label="全部" value="" />
             <el-option label="在用" value="in_service" />
             <el-option label="维修中" value="repairing" />
@@ -36,15 +41,43 @@
           <el-select v-model="filters.lifecycle" style="width: 180px" clearable>
             <el-option label="全部" value="" />
             <el-option label="借出中" value="borrowed" />
-            <el-option label="维保到期" value="maintenance_due" />
+            <el-option label="维护到期" value="maintenance_due" />
             <el-option label="质保到期" value="warranty_due" />
             <el-option label="已报废" value="scrapped" />
           </el-select>
         </el-form-item>
         <el-form-item label="实验室">
-          <el-select v-model="filters.labId" style="width: 180px" clearable>
+          <el-select v-model="filters.labId" style="width: 200px" clearable>
             <el-option label="全部" value="" />
             <el-option v-for="lab in labs" :key="lab.id" :label="lab.name" :value="lab.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="仓库">
+          <el-select v-model="filters.warehouseId" style="width: 150px" clearable>
+            <el-option label="全部" value="" />
+            <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="借用状态">
+          <el-select v-model="filters.isBorrowed" style="width: 150px" clearable>
+            <el-option label="全部" value="" />
+            <el-option label="已借出" value="true" />
+            <el-option label="未借出" value="false" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="可借权限">
+          <el-select v-model="filters.allowBorrow" style="width: 150px" clearable>
+            <el-option label="全部" value="" />
+            <el-option label="可借" value="true" />
+            <el-option label="不可借" value="false" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="到期快筛">
+          <el-select v-model="filters.duePreset" style="width: 190px" clearable>
+            <el-option label="全部" value="" />
+            <el-option label="7天内维保" value="maintenance_7" />
+            <el-option label="30天内维保" value="maintenance_30" />
+            <el-option label="30天内质保" value="warranty_30" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -52,6 +85,20 @@
           <el-button type="primary" :loading="loading" @click="handleSearch">查询</el-button>
         </el-form-item>
       </el-form>
+
+      <div v-if="activeFilterTags.length" class="filter-tags">
+        <span class="filter-tags__label">已启用筛选：</span>
+        <el-tag
+          v-for="item in activeFilterTags"
+          :key="item.key"
+          class="filter-tag"
+          size="small"
+          closable
+          @close="clearFilter(item.key)"
+        >
+          {{ item.label }}
+        </el-tag>
+      </div>
     </section>
 
     <section v-if="dueRows.length" class="panel-card">
@@ -61,7 +108,7 @@
       </div>
       <div class="due-list">
         <article v-for="item in dueRows" :key="item.id" class="due-card">
-          <strong>{{ item.assetCode || '-' }} · {{ item.name || '-' }}</strong>
+          <strong>{{ item.assetCode || '-' }} / {{ item.name || '-' }}</strong>
           <p>{{ item.labName || '-' }}</p>
           <p>下次保养 {{ item.nextMaintenanceAt || '-' }}</p>
           <p>质保到期 {{ item.warrantyUntil || '-' }}</p>
@@ -71,24 +118,47 @@
 
     <section class="panel-card">
       <el-table v-loading="loading" :data="rows" stripe>
-        <el-table-column prop="assetCode" label="资产编号" min-width="140" />
+        <el-table-column prop="assetCode" label="资产编号" min-width="150" />
         <el-table-column prop="name" label="资产名称" min-width="160" />
-        <el-table-column prop="labName" label="实验室" min-width="140" />
+        <el-table-column label="所在位置" min-width="170">
+          <template #default="{ row }">
+            <span v-if="row.warehouseId"><el-tag size="small" type="info">仓库</el-tag> {{ row.warehouseName || '-' }}</span>
+            <span v-else><el-tag size="small">实验室</el-tag> {{ row.labName || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="keeper" label="责任人" min-width="120" />
+        <el-table-column label="借用" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.isBorrowed ? 'warning' : 'info'">
+              {{ row.isBorrowed ? '已借出' : '未借出' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="可借" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.allowBorrow ? 'success' : 'info'">
+              {{ row.allowBorrow ? '可借' : '不可借' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="purchaseDate" label="采购日期" min-width="120" />
         <el-table-column label="采购金额" min-width="120">
           <template #default="{ row }">{{ money(row.price) }}</template>
         </el-table-column>
-        <el-table-column label="折旧" min-width="150">
+        <el-table-column label="折旧" min-width="160">
           <template #default="{ row }">{{ depreciationText(row) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="110">
-          <template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag></template>
+          <template #default="{ row }">
+            <el-tag size="small" :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="nextMaintenanceAt" label="下次保养" min-width="160" />
         <el-table-column label="操作" min-width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button link @click="openTransferDialog(row)">调拨</el-button>
+            <el-button link @click="openTransferHistory(row)">流转记录</el-button>
             <el-button link @click="openKeeperDialog(row)">责任人</el-button>
             <el-button link @click="openMaintenanceDialog(row)">维保计划</el-button>
             <el-button link @click="openHistory(row)">维修历史</el-button>
@@ -103,7 +173,7 @@
           v-model:current-page="page"
           v-model:page-size="pageSize"
           layout="total, sizes, prev, pager, next"
-          :page-sizes="[10, 20, 50]"
+          :page-sizes="[10, 20, 50, 100]"
           :total="total"
           @current-change="fetchRows"
           @size-change="handlePageSizeChange"
@@ -117,9 +187,20 @@
           <el-col :span="12"><el-form-item label="资产编号"><el-input v-model="form.assetCode" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="资产名称"><el-input v-model="form.name" /></el-form-item></el-col>
           <el-col :span="12">
-            <el-form-item label="实验室">
-              <el-select v-model="form.labId" style="width: 100%" @change="syncLabName">
+            <el-form-item label="存放类型">
+              <el-radio-group v-model="form.locationType" @change="handleLocationTypeChange">
+                <el-radio label="lab">实验室</el-radio>
+                <el-radio label="warehouse">仓库</el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item :label="form.locationType === 'lab' ? '实验室' : '仓库'">
+              <el-select v-if="form.locationType === 'lab'" v-model="form.labId" style="width: 100%" @change="syncLabName">
                 <el-option v-for="lab in labs" :key="lab.id" :label="lab.name" :value="lab.id" />
+              </el-select>
+              <el-select v-else v-model="form.warehouseId" style="width: 100%" @change="syncWarehouseName">
+                <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -196,7 +277,7 @@
 
     <el-drawer v-model="historyVisible" title="维修与维保历史" size="720px">
       <div class="panel-head">
-        <strong>{{ historyTarget?.assetCode || '-' }} · {{ historyTarget?.name || '-' }}</strong>
+        <strong>{{ historyTarget?.assetCode || '-' }} / {{ historyTarget?.name || '-' }}</strong>
         <el-button type="primary" @click="openRepairDialog">登记维修</el-button>
       </div>
       <div v-if="timelineRows.length" class="timeline-list">
@@ -241,14 +322,76 @@
         <el-button type="primary" @click="printCode">打印资产码</el-button>
       </div>
     </el-dialog>
+
+
+    <el-dialog v-model="transferVisible" title="资产调拨" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="目标存放类型">
+          <el-radio-group v-model="transferForm.targetType" @change="handleTransferTypeChange">
+            <el-radio label="lab">实验室</el-radio>
+            <el-radio label="warehouse">仓库</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="transferForm.targetType === 'lab' ? '选择实验室' : '选择仓库'">
+          <el-select v-if="transferForm.targetType === 'lab'" v-model="transferForm.targetId" style="width: 100%">
+            <el-option v-for="lab in labs" :key="lab.id" :label="lab.name" :value="lab.id" />
+          </el-select>
+          <el-select v-else v-model="transferForm.targetId" style="width: 100%">
+            <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="调拨说明">
+          <el-input v-model="transferForm.reason" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="transferVisible = false">取消</el-button>
+        <el-button type="primary" :loading="transferSaving" @click="submitTransfer">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <el-drawer v-model="transferHistoryVisible" title="资产流转记录" size="720px">
+      <div v-if="transferRecords.length" class="timeline-list">
+        <el-timeline>
+          <el-timeline-item
+            v-for="(item, index) in transferRecords"
+            :key="item.id || index"
+            :timestamp="item.transferDate"
+            placement="top"
+          >
+            <el-card>
+              <h4>{{ item.operatorName || '-' }} 调拨了资产</h4>
+              <p>
+                <strong>从：</strong> {{ [item.fromLabName, item.fromWarehouseName].filter(Boolean).join(' ') || '采购入库' }}<br/>
+                <strong>至：</strong> {{ [item.toLabName, item.toWarehouseName].filter(Boolean).join(' ') || '-' }}<br/>
+                <strong>原因：</strong> {{ item.reason || '-' }}
+              </p>
+            </el-card>
+          </el-timeline-item>
+        </el-timeline>
+      </div>
+      <el-empty v-else description="暂无流转记录" />
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { ElMessage } from 'element-plus'
-import { createEquipment, createEquipmentEvent, getDueMaintenanceEquipments, getEquipmentCode, getEquipmentDetail, getEquipmentEvents, getEquipmentList, scrapEquipment, updateEquipment, updateEquipmentMaintenancePlan } from '@/api/equipments'
+import {
+  createEquipment,
+  createEquipmentEvent,
+  getDueMaintenanceEquipments,
+  getEquipmentCode,
+  getEquipmentDetail,
+  getEquipmentEvents,
+  getEquipmentList,
+  scrapEquipment,
+  updateEquipment,
+  updateEquipmentMaintenancePlan
+} from '@/api/equipments'
 import { getLabs } from '@/api/labs'
 import { getRepairOrders } from '@/api/repairs'
+import { getWarehouses, transferAssets, getAssetTransfers } from '@/api/warehouses'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -261,6 +404,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const labs = ref([])
+const warehouses = ref([])
 const dueRows = ref([])
 const detail = ref(null)
 const historyTarget = ref(null)
@@ -277,63 +421,617 @@ const repairVisible = ref(false)
 const codeVisible = ref(false)
 
 const summary = reactive({ total: 0, borrowed: 0, maintenanceDue: 0, scrapped: 0 })
-const filters = reactive({ keyword: '', status: '', lifecycle: '', labId: '' })
-const form = reactive({ assetCode: '', name: '', labId: undefined, labName: '', keeper: '', brand: '', model: '', purchaseDate: '', price: '', specJson: '', allowBorrow: false })
-const maintenanceForm = reactive({ id: 0, nextMaintenanceAt: '', maintenanceCycleDays: 180, maintenanceNote: '', warrantyUntil: '', locationNote: '', barcodeValue: '', markMaintained: false })
+const filters = reactive({
+  keyword: '',
+  status: '',
+  lifecycle: '',
+  labId: '',
+  warehouseId: '',
+  isBorrowed: '',
+  allowBorrow: '',
+  duePreset: ''
+})
+const form = reactive({
+  assetCode: '',
+  name: '',
+  locationType: 'lab',
+  labId: undefined,
+  labName: '',
+  warehouseId: undefined,
+  warehouseName: '',
+  keeper: '',
+  brand: '',
+  model: '',
+  purchaseDate: '',
+  price: '',
+  specJson: '',
+  allowBorrow: false
+})
+const maintenanceForm = reactive({
+  id: 0,
+  nextMaintenanceAt: '',
+  maintenanceCycleDays: 180,
+  maintenanceNote: '',
+  warrantyUntil: '',
+  locationNote: '',
+  barcodeValue: '',
+  markMaintained: false
+})
 const keeperForm = reactive({ id: 0, keeper: '' })
 const scrapForm = reactive({ id: 0, reason: '' })
 const repairForm = reactive({ issueType: 'hardware', note: '', description: '' })
 
-const timelineRows = computed(() => [...eventRows.value.map((item) => ({ key: `event-${item.id}`, title: eventLabel(item.eventType), subtitle: `操作人 ${item.operatorName || '-'}`, detail: item.note || '无附加说明', time: item.createdAt || '' })), ...repairRows.value.map((item) => ({ key: `repair-${item.id}`, title: `维修工单 ${item.orderNo || `#${item.id}`}`, subtitle: `状态 ${repairStatus(item.status)} · 指派 ${item.assigneeName || '-'}`, detail: item.description || '无工单描述', time: item.updatedAt || item.submittedAt || '' }))].sort((a, b) => timeValue(b.time) - timeValue(a.time)))
+const lifecycleTextMap = {
+  borrowed: '借出中',
+  maintenance_due: '维护到期',
+  warranty_due: '质保到期',
+  scrapped: '已报废'
+}
+const duePresetMap = {
+  maintenance_7: { maintenanceDueDays: 7 },
+  maintenance_30: { maintenanceDueDays: 30 },
+  warranty_30: { warrantyDueDays: 30 }
+}
+const duePresetTextMap = {
+  maintenance_7: '7天内维保',
+  maintenance_30: '30天内维保',
+  warranty_30: '30天内质保'
+}
 
-function timeValue(value) { const n = Date.parse(String(value || '').trim().replace(' ', 'T')); return Number.isFinite(n) ? n : 0 }
-function numberValue(value) { const n = Number(value); return Number.isFinite(n) ? n : 0 }
-function statusText(status) { return status === 'repairing' ? '维修中' : status === 'scrapped' ? '已报废' : '在用' }
-function statusType(status) { return status === 'repairing' ? 'warning' : status === 'scrapped' ? 'danger' : 'success' }
-function repairStatus(status) { return status === 'accepted' ? '已受理' : status === 'processing' ? '处理中' : status === 'completed' ? '已完成' : '已提交' }
-function eventLabel(type) { return type === 'maintain' ? '维修登记' : type === 'maint_plan' ? '维保计划更新' : type === 'scrap' ? '资产报废' : type || '事件记录' }
-function money(value) { return `¥${numberValue(value).toFixed(2)}` }
-function depreciationMeta(row) { const price = numberValue(row?.price); const purchaseAt = Date.parse(String(row?.purchaseDate || '').trim()); if (!price || !Number.isFinite(purchaseAt)) return { residualValue: 0, progress: 0 }; const progress = Math.min(Math.max((Date.now() - purchaseAt) / (365 * 5 * 24 * 60 * 60 * 1000), 0), 1); return { residualValue: price * (1 - progress), progress } }
-function depreciationText(row) { return numberValue(row?.price) ? `${(depreciationMeta(row).progress * 100).toFixed(0)}% · 净值 ${money(depreciationMeta(row).residualValue)}` : '未录入金额' }
-function syncLabName(value) { const target = labs.value.find((item) => Number(item.id) === Number(value)); form.labName = target?.name || '' }
-function payloadFromDetail(row, overrides = {}) { return { assetCode: row.assetCode || '', name: row.name || '', model: row.model || '', brand: row.brand || '', labId: row.labId, labName: row.labName || '', status: row.status || 'in_service', keeper: row.keeper || '', purchaseDate: row.purchaseDate || '', price: row.price != null ? row.price : '', specJson: row.specJson || '', imageUrl: row.imageUrl || '', allowBorrow: Boolean(row.allowBorrow), ...overrides } }
+const timelineRows = computed(() => (
+  [
+    ...eventRows.value.map((item) => ({
+      key: `event-${item.id}`,
+      title: eventLabel(item.eventType),
+      subtitle: `操作人 ${item.operatorName || '-'}`,
+      detail: item.note || '无附加说明',
+      time: item.createdAt || ''
+    })),
+    ...repairRows.value.map((item) => ({
+      key: `repair-${item.id}`,
+      title: `维修工单 ${item.orderNo || `#${item.id}`}`,
+      subtitle: `状态 ${repairStatus(item.status)} / 指派 ${item.assigneeName || '-'}`,
+      detail: item.description || '无工单描述',
+      time: item.updatedAt || item.submittedAt || ''
+    }))
+  ].sort((a, b) => timeValue(b.time) - timeValue(a.time))
+))
 
-async function fetchLabs() { const response = await getLabs(); labs.value = Array.isArray(response.data?.data) ? response.data.data : [] }
-async function fetchDueRows() { const response = await getDueMaintenanceEquipments({ days: 30, limit: 8 }); dueRows.value = Array.isArray(response.data?.data) ? response.data.data : [] }
-async function fetchSummary() { const [a, b, c, d] = await Promise.all([getEquipmentList({ page: 1, pageSize: 1 }), getEquipmentList({ page: 1, pageSize: 1, lifecycle: 'borrowed' }), getEquipmentList({ page: 1, pageSize: 1, maintenanceDueDays: 30 }), getEquipmentList({ page: 1, pageSize: 1, status: 'scrapped' })]); summary.total = Number(a.data?.meta?.total || 0); summary.borrowed = Number(b.data?.meta?.total || 0); summary.maintenanceDue = Number(c.data?.meta?.total || 0); summary.scrapped = Number(d.data?.meta?.total || 0) }
-async function fetchRows() { loading.value = true; try { const response = await getEquipmentList({ page: page.value, pageSize: pageSize.value, keyword: filters.keyword, status: filters.status, lifecycle: filters.lifecycle, labId: filters.labId }); rows.value = Array.isArray(response.data?.data) ? response.data.data : []; total.value = Number(response.data?.meta?.total || 0) } finally { loading.value = false } }
-async function refreshAll() { await Promise.all([fetchRows(), fetchSummary(), fetchDueRows()]) }
-function handleSearch() { page.value = 1; fetchRows() }
-function resetFilters() { filters.keyword = ''; filters.status = ''; filters.lifecycle = ''; filters.labId = ''; handleSearch() }
-function handlePageSizeChange(size) { pageSize.value = size; page.value = 1; fetchRows() }
-function openCreateDialog() { form.assetCode = ''; form.name = ''; form.labId = undefined; form.labName = ''; form.keeper = ''; form.brand = ''; form.model = ''; form.purchaseDate = ''; form.price = ''; form.specJson = ''; form.allowBorrow = false; dialogVisible.value = true }
-async function submitCreate() { if (!form.assetCode.trim() || !form.name.trim() || !form.labId || !form.labName) { ElMessage.warning('请填写资产编号、名称并选择实验室'); return } saving.value = true; try { await createEquipment({ assetCode: form.assetCode.trim(), name: form.name.trim(), labId: form.labId, labName: form.labName.trim(), keeper: form.keeper.trim(), brand: form.brand.trim(), model: form.model.trim(), purchaseDate: form.purchaseDate, price: form.price ? Number(form.price) : '', specJson: form.specJson.trim(), imageUrl: '', status: 'in_service', allowBorrow: form.allowBorrow }); dialogVisible.value = false; ElMessage.success('采购入库完成'); await refreshAll() } finally { saving.value = false } }
-async function openDetail(row) { const response = await getEquipmentDetail(row.id); detail.value = response.data?.data || null; detailVisible.value = true }
-async function openMaintenanceDialog(row) { const response = await getEquipmentDetail(row.id); detail.value = response.data?.data || null; if (!detail.value) return; maintenanceForm.id = detail.value.id; maintenanceForm.nextMaintenanceAt = detail.value.nextMaintenanceAt || ''; maintenanceForm.maintenanceCycleDays = Number(detail.value.maintenanceCycleDays || 180); maintenanceForm.maintenanceNote = detail.value.maintenanceNote || ''; maintenanceForm.warrantyUntil = detail.value.warrantyUntil || ''; maintenanceForm.locationNote = detail.value.locationNote || ''; maintenanceForm.barcodeValue = detail.value.barcodeValue || ''; maintenanceForm.markMaintained = false; maintenanceVisible.value = true }
-async function submitMaintenance() { maintenanceSaving.value = true; try { await updateEquipmentMaintenancePlan(maintenanceForm.id, { nextMaintenanceAt: maintenanceForm.nextMaintenanceAt, maintenanceCycleDays: maintenanceForm.maintenanceCycleDays, maintenanceNote: maintenanceForm.maintenanceNote, warrantyUntil: maintenanceForm.warrantyUntil, locationNote: maintenanceForm.locationNote, barcodeValue: maintenanceForm.barcodeValue, markMaintained: maintenanceForm.markMaintained }); maintenanceVisible.value = false; ElMessage.success('维保计划已更新'); await refreshAll() } finally { maintenanceSaving.value = false } }
-async function openKeeperDialog(row) { const response = await getEquipmentDetail(row.id); detail.value = response.data?.data || null; if (!detail.value) return; keeperForm.id = detail.value.id; keeperForm.keeper = detail.value.keeper || ''; keeperVisible.value = true }
-async function submitKeeper() { if (!detail.value) return; keeperSaving.value = true; try { await updateEquipment(detail.value.id, payloadFromDetail(detail.value, { keeper: keeperForm.keeper.trim() })); keeperVisible.value = false; ElMessage.success('责任人已变更'); await refreshAll() } finally { keeperSaving.value = false } }
-function openScrapDialog(row) { scrapForm.id = Number(row.id || 0); scrapForm.reason = ''; scrapVisible.value = true }
-async function submitScrap() { if (!scrapForm.reason.trim()) { ElMessage.warning('请输入报废原因'); return } scrapSaving.value = true; try { await scrapEquipment(scrapForm.id, { reason: scrapForm.reason.trim() }); scrapVisible.value = false; ElMessage.success('资产已报废'); await refreshAll() } finally { scrapSaving.value = false } }
-async function openHistory(row) { historyTarget.value = row; historyVisible.value = true; const [eventsResp, repairsResp] = await Promise.all([getEquipmentEvents(row.id, { page: 1, pageSize: 50 }), getRepairOrders({ equipmentId: row.id, page: 1, pageSize: 50 })]); eventRows.value = Array.isArray(eventsResp.data?.data) ? eventsResp.data.data : []; repairRows.value = Array.isArray(repairsResp.data?.data) ? repairsResp.data.data : [] }
-function openRepairDialog() { repairForm.issueType = 'hardware'; repairForm.note = ''; repairForm.description = ''; repairVisible.value = true }
-async function submitRepair() { if (!historyTarget.value?.id) return; if (!repairForm.note.trim() && !repairForm.description.trim()) { ElMessage.warning('请填写维修说明'); return } repairSaving.value = true; try { await createEquipmentEvent(historyTarget.value.id, { eventType: 'maintain', issueType: repairForm.issueType, note: repairForm.note.trim(), description: repairForm.description.trim() || repairForm.note.trim() }); repairVisible.value = false; ElMessage.success('维修登记已生成'); await openHistory(historyTarget.value); await refreshAll() } finally { repairSaving.value = false } }
-async function openCodeDialog(row) { const response = await getEquipmentCode(row.id); codeData.value = response.data?.data || null; codeVisible.value = true }
-async function copyText(value) { const text = String(value || '').trim(); if (!text) return; if (navigator?.clipboard?.writeText) { await navigator.clipboard.writeText(text); ElMessage.success('已复制') } }
-function printCode() { if (!codeData.value) return; const win = window.open('', '_blank', 'width=640,height=720'); if (!win) return; win.document.write(`<html><body style="font-family:Arial;padding:24px"><h2>${codeData.value.assetCode || '-'}</h2><p>二维码内容：${codeData.value.qrText || '-'}</p><p>条码内容：${codeData.value.barcodeValue || '-'}</p></body></html>`); win.document.close(); win.print() }
+const activeFilterTags = computed(() => {
+  const items = []
+  if (filters.keyword) items.push({ key: 'keyword', label: `关键字: ${filters.keyword}` })
+  if (filters.status) items.push({ key: 'status', label: `状态: ${statusText(filters.status)}` })
+  if (filters.lifecycle) items.push({ key: 'lifecycle', label: `生命周期: ${lifecycleTextMap[filters.lifecycle] || filters.lifecycle}` })
+  if (filters.labId) {
+    const lab = labs.value.find((item) => String(item.id) === String(filters.labId))
+    if (lab?.name) items.push({ key: 'labId', label: `实验室: ${lab.name}` })
+  }
+  if (filters.warehouseId) {
+    const w = warehouses.value.find((item) => String(item.id) === String(filters.warehouseId))
+    if (w?.name) items.push({ key: 'warehouseId', label: `仓库: ${w.name}` })
+  }
+  if (filters.isBorrowed !== '') items.push({ key: 'isBorrowed', label: filters.isBorrowed === 'true' ? '已借出' : '未借出' })
+  if (filters.allowBorrow !== '') items.push({ key: 'allowBorrow', label: filters.allowBorrow === 'true' ? '可借' : '不可借' })
+  if (filters.duePreset) items.push({ key: 'duePreset', label: duePresetTextMap[filters.duePreset] || filters.duePreset })
+  return items
+})
 
-onMounted(async () => { await fetchLabs(); await refreshAll() })
+function timeValue(value) {
+  const n = Date.parse(String(value || '').trim().replace(' ', 'T'))
+  return Number.isFinite(n) ? n : 0
+}
+
+function numberValue(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function statusText(status) {
+  if (status === 'repairing') return '维修中'
+  if (status === 'scrapped') return '已报废'
+  return '在用'
+}
+
+function statusType(status) {
+  if (status === 'repairing') return 'warning'
+  if (status === 'scrapped') return 'danger'
+  return 'success'
+}
+
+function repairStatus(status) {
+  if (status === 'accepted') return '已受理'
+  if (status === 'processing') return '处理中'
+  if (status === 'completed') return '已完成'
+  return '已提交'
+}
+
+function eventLabel(type) {
+  if (type === 'maintain') return '维修登记'
+  if (type === 'maint_plan') return '维保计划更新'
+  if (type === 'scrap') return '资产报废'
+  return type || '事件记录'
+}
+
+function money(value) {
+  return `¥${numberValue(value).toFixed(2)}`
+}
+
+function depreciationMeta(row) {
+  const price = numberValue(row?.price)
+  const purchaseAt = Date.parse(String(row?.purchaseDate || '').trim())
+  if (!price || !Number.isFinite(purchaseAt)) return { residualValue: 0, progress: 0 }
+  const progress = Math.min(Math.max((Date.now() - purchaseAt) / (365 * 5 * 24 * 60 * 60 * 1000), 0), 1)
+  return { residualValue: price * (1 - progress), progress }
+}
+
+function depreciationText(row) {
+  if (!numberValue(row?.price)) return '未录入金额'
+  const meta = depreciationMeta(row)
+  return `${(meta.progress * 100).toFixed(0)}% / 净值 ${money(meta.residualValue)}`
+}
+
+function syncLabName(value) {
+  const target = labs.value.find((item) => Number(item.id) === Number(value))
+  form.labName = target?.name || ''
+}
+
+function syncWarehouseName(value) {
+  const target = warehouses.value.find((item) => Number(item.id) === Number(value))
+  form.warehouseName = target?.name || ''
+}
+
+function handleLocationTypeChange() {
+  form.labId = undefined
+  form.labName = ''
+  form.warehouseId = undefined
+  form.warehouseName = ''
+}
+
+function payloadFromDetail(row, overrides = {}) {
+  return {
+    assetCode: row.assetCode || '',
+    name: row.name || '',
+    model: row.model || '',
+    brand: row.brand || '',
+    labId: row.labId,
+    labName: row.labName || '',
+    status: row.status || 'in_service',
+    keeper: row.keeper || '',
+    purchaseDate: row.purchaseDate || '',
+    price: row.price != null ? row.price : '',
+    specJson: row.specJson || '',
+    imageUrl: row.imageUrl || '',
+    allowBorrow: Boolean(row.allowBorrow),
+    ...overrides
+  }
+}
+
+function buildEquipmentQuery() {
+  const params = {
+    page: page.value,
+    pageSize: pageSize.value,
+    keyword: filters.keyword,
+    status: filters.status,
+    lifecycle: filters.lifecycle,
+    labId: filters.labId,
+    warehouseId: filters.warehouseId
+  }
+  if (filters.isBorrowed !== '') params.isBorrowed = filters.isBorrowed
+  if (filters.allowBorrow !== '') params.allowBorrow = filters.allowBorrow
+  Object.assign(params, duePresetMap[filters.duePreset] || {})
+  return params
+}
+
+function clearFilter(key) {
+  if (!Object.prototype.hasOwnProperty.call(filters, key)) return
+  filters[key] = ''
+  handleSearch()
+}
+
+async function fetchLabs() {
+  const response = await getLabs()
+  labs.value = Array.isArray(response.data?.data) ? response.data.data : []
+}
+
+async function fetchWarehouses() {
+  const response = await getWarehouses({ page: 1, pageSize: 200 })
+  warehouses.value = Array.isArray(response.data?.data?.items) ? response.data.data.items : []
+}
+
+async function fetchDueRows() {
+  const response = await getDueMaintenanceEquipments({ days: 30, limit: 8 })
+  dueRows.value = Array.isArray(response.data?.data) ? response.data.data : []
+}
+
+async function fetchSummary() {
+  const [a, b, c, d] = await Promise.all([
+    getEquipmentList({ page: 1, pageSize: 1 }),
+    getEquipmentList({ page: 1, pageSize: 1, lifecycle: 'borrowed' }),
+    getEquipmentList({ page: 1, pageSize: 1, maintenanceDueDays: 30 }),
+    getEquipmentList({ page: 1, pageSize: 1, status: 'scrapped' })
+  ])
+  summary.total = Number(a.data?.meta?.total || 0)
+  summary.borrowed = Number(b.data?.meta?.total || 0)
+  summary.maintenanceDue = Number(c.data?.meta?.total || 0)
+  summary.scrapped = Number(d.data?.meta?.total || 0)
+}
+
+async function fetchRows() {
+  loading.value = true
+  try {
+    const response = await getEquipmentList(buildEquipmentQuery())
+    rows.value = Array.isArray(response.data?.data) ? response.data.data : []
+    total.value = Number(response.data?.meta?.total || 0)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([fetchRows(), fetchSummary(), fetchDueRows()])
+}
+
+function handleSearch() {
+  page.value = 1
+  fetchRows()
+}
+
+function resetFilters() {
+  filters.keyword = ''
+  filters.status = ''
+  filters.lifecycle = ''
+  filters.labId = ''
+  filters.warehouseId = ''
+  filters.isBorrowed = ''
+  filters.allowBorrow = ''
+  filters.duePreset = ''
+  handleSearch()
+}
+
+function handlePageSizeChange(size) {
+  pageSize.value = size
+  page.value = 1
+  fetchRows()
+}
+
+function openCreateDialog() {
+  form.assetCode = ''
+  form.name = ''
+  form.locationType = 'lab'
+  form.labId = undefined
+  form.labName = ''
+  form.warehouseId = undefined
+  form.warehouseName = ''
+  form.keeper = ''
+  form.brand = ''
+  form.model = ''
+  form.purchaseDate = ''
+  form.price = ''
+  form.specJson = ''
+  form.allowBorrow = false
+  dialogVisible.value = true
+}
+
+async function submitCreate() {
+  if (!form.assetCode.trim() || !form.name.trim()) {
+    ElMessage.warning('请填写资产编号和名称')
+    return
+  }
+  if (form.locationType === 'lab' && (!form.labId || !form.labName)) {
+    ElMessage.warning('请选择实验室')
+    return
+  }
+  if (form.locationType === 'warehouse' && (!form.warehouseId || !form.warehouseName)) {
+    ElMessage.warning('请选择仓库')
+    return
+  }
+  saving.value = true
+  try {
+    await createEquipment({
+      assetCode: form.assetCode.trim(),
+      name: form.name.trim(),
+      labId: form.locationType === 'lab' ? form.labId : null,
+      labName: form.locationType === 'lab' ? form.labName.trim() : '',
+      warehouseId: form.locationType === 'warehouse' ? form.warehouseId : null,
+      warehouseName: form.locationType === 'warehouse' ? form.warehouseName.trim() : '',
+      keeper: form.keeper.trim(),
+      brand: form.brand.trim(),
+      model: form.model.trim(),
+      purchaseDate: form.purchaseDate,
+      price: form.price ? Number(form.price) : '',
+      specJson: form.specJson.trim(),
+      imageUrl: '',
+      status: 'in_service',
+      allowBorrow: form.allowBorrow
+    })
+    dialogVisible.value = false
+    ElMessage.success('采购入库完成')
+    await refreshAll()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function openDetail(row) {
+  const response = await getEquipmentDetail(row.id)
+  detail.value = response.data?.data || null
+  detailVisible.value = true
+}
+
+async function openMaintenanceDialog(row) {
+  const response = await getEquipmentDetail(row.id)
+  detail.value = response.data?.data || null
+  if (!detail.value) return
+  maintenanceForm.id = detail.value.id
+  maintenanceForm.nextMaintenanceAt = detail.value.nextMaintenanceAt || ''
+  maintenanceForm.maintenanceCycleDays = Number(detail.value.maintenanceCycleDays || 180)
+  maintenanceForm.maintenanceNote = detail.value.maintenanceNote || ''
+  maintenanceForm.warrantyUntil = detail.value.warrantyUntil || ''
+  maintenanceForm.locationNote = detail.value.locationNote || ''
+  maintenanceForm.barcodeValue = detail.value.barcodeValue || ''
+  maintenanceForm.markMaintained = false
+  maintenanceVisible.value = true
+}
+
+async function submitMaintenance() {
+  maintenanceSaving.value = true
+  try {
+    await updateEquipmentMaintenancePlan(maintenanceForm.id, {
+      nextMaintenanceAt: maintenanceForm.nextMaintenanceAt,
+      maintenanceCycleDays: maintenanceForm.maintenanceCycleDays,
+      maintenanceNote: maintenanceForm.maintenanceNote,
+      warrantyUntil: maintenanceForm.warrantyUntil,
+      locationNote: maintenanceForm.locationNote,
+      barcodeValue: maintenanceForm.barcodeValue,
+      markMaintained: maintenanceForm.markMaintained
+    })
+    maintenanceVisible.value = false
+    ElMessage.success('维保计划已更新')
+    await refreshAll()
+  } finally {
+    maintenanceSaving.value = false
+  }
+}
+
+async function openKeeperDialog(row) {
+  const response = await getEquipmentDetail(row.id)
+  detail.value = response.data?.data || null
+  if (!detail.value) return
+  keeperForm.id = detail.value.id
+  keeperForm.keeper = detail.value.keeper || ''
+  keeperVisible.value = true
+}
+
+async function submitKeeper() {
+  if (!detail.value) return
+  keeperSaving.value = true
+  try {
+    await updateEquipment(detail.value.id, payloadFromDetail(detail.value, { keeper: keeperForm.keeper.trim() }))
+    keeperVisible.value = false
+    ElMessage.success('责任人已变更')
+    await refreshAll()
+  } finally {
+    keeperSaving.value = false
+  }
+}
+
+function openScrapDialog(row) {
+  scrapForm.id = Number(row.id || 0)
+  scrapForm.reason = ''
+  scrapVisible.value = true
+}
+
+async function submitScrap() {
+  if (!scrapForm.reason.trim()) {
+    ElMessage.warning('请输入报废原因')
+    return
+  }
+  scrapSaving.value = true
+  try {
+    await scrapEquipment(scrapForm.id, { reason: scrapForm.reason.trim() })
+    scrapVisible.value = false
+    ElMessage.success('资产已报废')
+    await refreshAll()
+  } finally {
+    scrapSaving.value = false
+  }
+}
+
+async function openHistory(row) {
+  historyTarget.value = row
+  historyVisible.value = true
+  const [eventsResp, repairsResp] = await Promise.all([
+    getEquipmentEvents(row.id, { page: 1, pageSize: 50 }),
+    getRepairOrders({ equipmentId: row.id, page: 1, pageSize: 50 })
+  ])
+  eventRows.value = Array.isArray(eventsResp.data?.data) ? eventsResp.data.data : []
+  repairRows.value = Array.isArray(repairsResp.data?.data) ? repairsResp.data.data : []
+}
+
+function openRepairDialog() {
+  repairForm.issueType = 'hardware'
+  repairForm.note = ''
+  repairForm.description = ''
+  repairVisible.value = true
+}
+
+async function submitRepair() {
+  if (!historyTarget.value?.id) return
+  if (!repairForm.note.trim() && !repairForm.description.trim()) {
+    ElMessage.warning('请填写维修说明')
+    return
+  }
+  repairSaving.value = true
+  try {
+    await createEquipmentEvent(historyTarget.value.id, {
+      eventType: 'maintain',
+      issueType: repairForm.issueType,
+      note: repairForm.note.trim(),
+      description: repairForm.description.trim() || repairForm.note.trim()
+    })
+    repairVisible.value = false
+    ElMessage.success('维修登记已生成')
+    await openHistory(historyTarget.value)
+    await refreshAll()
+  } finally {
+    repairSaving.value = false
+  }
+}
+
+async function openCodeDialog(row) {
+  const response = await getEquipmentCode(row.id)
+  codeData.value = response.data?.data || null
+  codeVisible.value = true
+}
+
+async function copyText(value) {
+  const text = String(value || '').trim()
+  if (!text) return
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  }
+}
+
+function printCode() {
+  if (!codeData.value) return
+  const win = window.open('', '_blank', 'width=640,height=720')
+  if (!win) return
+  win.document.write(`
+    <html>
+      <body style="font-family: Arial, sans-serif; padding: 24px;">
+        <h2>${codeData.value.assetCode || '-'}</h2>
+        <p>二维码内容：${codeData.value.qrText || '-'}</p>
+        <p>条码内容：${codeData.value.barcodeValue || '-'}</p>
+      </body>
+    </html>
+  `)
+  win.document.close()
+  win.print()
+}
+
+
+const transferVisible = ref(false)
+const transferSaving = ref(false)
+const transferHistoryVisible = ref(false)
+const transferRecords = ref([])
+const transferForm = reactive({
+  assetId: 0,
+  targetType: 'lab',
+  targetId: undefined,
+  reason: ''
+})
+
+function openTransferDialog(row) {
+  transferForm.assetId = row.id
+  transferForm.targetType = 'lab'
+  transferForm.targetId = undefined
+  transferForm.reason = ''
+  transferVisible.value = true
+}
+
+function handleTransferTypeChange() {
+  transferForm.targetId = undefined
+}
+
+async function submitTransfer() {
+  if (!transferForm.targetId) {
+    ElMessage.warning('请选择目标位置')
+    return
+  }
+  transferSaving.value = true
+  try {
+    await transferAssets({
+      assetIds: [transferForm.assetId],
+      targetType: transferForm.targetType,
+      targetId: transferForm.targetId,
+      reason: transferForm.reason.trim()
+    })
+    transferVisible.value = false
+    ElMessage.success('资产调拨成功')
+    await fetchRows()
+  } finally {
+    transferSaving.value = false
+  }
+}
+
+async function openTransferHistory(row) {
+  const response = await getAssetTransfers(row.id)
+  transferRecords.value = Array.isArray(response.data?.data?.items) ? response.data.data.items : []
+  transferHistoryVisible.value = true
+}
+
+onMounted(async () => {
+  await fetchLabs()
+  await fetchWarehouses()
+  await refreshAll()
+})
 </script>
 
 <style scoped lang="scss">
 .asset-page { display: flex; flex-direction: column; gap: 18px; }
-.hero-card, .panel-card, .metric-card, .due-card, .timeline-card { padding: 24px; border: 1px solid var(--app-border); border-radius: 24px; background: var(--app-surface); box-shadow: var(--app-shadow); }
-.hero-card, .hero-actions, .panel-head, .pager-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.hero-card, .panel-head, .hero-actions { flex-wrap: wrap; }
-.eyebrow { display: inline-flex; margin-bottom: 8px; color: #166534; font-size: 13px; letter-spacing: 0.08em; }
-.metric-grid, .due-list, .timeline-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.metric-card span, .due-card p, .timeline-card p { color: var(--app-text-secondary); }
-.metric-card strong { display: block; margin-top: 8px; font-size: 32px; }
+.hero-card,
+.panel-card,
+.metric-card,
+.due-card,
+.timeline-card {
+  padding: 24px;
+  border: 1px solid var(--app-border);
+  border-radius: 24px;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+.hero-card,
+.hero-actions,
+.panel-head,
+.pager-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hero-card,
+.panel-head,
+.hero-actions { flex-wrap: wrap; }
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 8px;
+  color: #166534;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+.metric-grid,
+.due-list,
+.timeline-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+.metric-card span,
+.due-card p,
+.timeline-card p { color: var(--app-text-secondary); }
+.metric-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 32px;
+}
+.filters-form { row-gap: 4px; }
+.filter-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.filter-tags__label {
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+.filter-tag { margin-right: 0; }
 .timeline-list { margin-top: 16px; }
-@media (max-width: 960px) { .hero-card, .hero-actions, .panel-head { flex-direction: column; align-items: flex-start; } }
+@media (max-width: 960px) {
+  .hero-card,
+  .hero-actions,
+  .panel-head { flex-direction: column; align-items: flex-start; }
+}
 </style>

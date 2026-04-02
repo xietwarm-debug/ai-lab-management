@@ -19,6 +19,42 @@
           </view>
         </view>
 
+        <view class="card" v-if="canManagePermissions">
+          <view class="rowBetween">
+            <view>
+              <view class="cardTitle">资产只读权限</view>
+              <view class="muted">用于手机端只读资产查询和 AI 资产问答。</view>
+            </view>
+            <view class="statusPill" :class="permissionStatusClass(assetReadPermission)">
+              {{ permissionStatusText(assetReadPermission) }}
+            </view>
+          </view>
+          <view class="muted permissionMeta" v-if="assetReadPermission && assetReadPermission.expiresAt">
+            到期时间：{{ assetReadPermission.expiresAt }}
+          </view>
+          <view class="actions">
+            <button class="btnSecondary miniBtn" size="mini" :disabled="permissionLoading" @click="fetchPermissions">刷新</button>
+            <button
+              v-if="!(assetReadPermission && assetReadPermission.granted)"
+              class="btnPrimary miniBtn"
+              size="mini"
+              :disabled="permissionLoading"
+              @click="grantAssetReadPermission"
+            >
+              授权
+            </button>
+            <button
+              v-else
+              class="btnDanger miniBtn"
+              size="mini"
+              :disabled="permissionLoading"
+              @click="revokeAssetReadPermission"
+            >
+              撤销
+            </button>
+          </view>
+        </view>
+
         <view class="card">
           <view class="chipRow">
             <view
@@ -100,7 +136,9 @@
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, adminGetUserPermissions, adminGrantUserPermission, adminRevokeUserPermission } from "@/common/api.js"
+
+const PERMISSION_ASSET_READ_BASIC = "asset.read_basic"
 
 function toInt(v, d = 0) {
   const n = Number(v)
@@ -112,6 +150,9 @@ export default {
     return {
       uid: 0,
       loading: false,
+      permissionLoading: false,
+      currentRole: "",
+      permissionRows: [],
       currentTab: "reservations",
       tabs: [
         { label: "预约", value: "reservations" },
@@ -127,6 +168,14 @@ export default {
   computed: {
     user() { return (this.detail || {}).user || {} },
     summary() { return (this.detail || {}).summary || {} },
+    canManagePermissions() {
+      const targetRole = String((this.user || {}).role || "").trim()
+      return this.currentRole === "admin" && (targetRole === "teacher" || targetRole === "student")
+    },
+    assetReadPermission() {
+      const rows = Array.isArray(this.permissionRows) ? this.permissionRows : []
+      return rows.find((item) => String((item && item.permissionCode) || "").trim() === PERMISSION_ASSET_READ_BASIC) || null
+    },
     summaryCards() {
       return [
         { key: "reservation", label: "预约", value: toInt(this.summary.reservationTotal, 0) },
@@ -140,6 +189,12 @@ export default {
   },
   onLoad(query) {
     this.uid = toInt((query || {}).uid, 0)
+    try {
+      const session = uni.getStorageSync("session") || {}
+      this.currentRole = String((session && session.role) || "").trim()
+    } catch (e) {
+      this.currentRole = ""
+    }
     if (this.uid <= 0) {
       uni.showToast({ title: "用户ID无效", icon: "none" })
       return
@@ -158,6 +213,67 @@ export default {
       if (Number((u || {}).isActive || 0) === 1) return "活跃"
       return "停用"
     },
+    permissionStatusText(row) {
+      if (row && row.granted) return "已授权"
+      if (row && row.source === "expired") return "已过期"
+      return "未授权"
+    },
+    permissionStatusClass(row) {
+      if (row && row.granted) return "statusGranted"
+      if (row && row.source === "expired") return "statusExpired"
+      return "statusPlain"
+    },
+    async fetchPermissions() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      this.permissionLoading = true
+      try {
+        const res = await adminGetUserPermissions(this.uid)
+        const payload = (res && res.data) || {}
+        const data = payload && payload.ok ? payload.data : {}
+        this.permissionRows = Array.isArray(data.items) ? data.items : []
+      } catch (e) {
+        this.permissionRows = []
+      } finally {
+        this.permissionLoading = false
+      }
+    },
+    async grantAssetReadPermission() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      this.permissionLoading = true
+      try {
+        const res = await adminGrantUserPermission(this.uid, { permissionCode: PERMISSION_ASSET_READ_BASIC })
+        const payload = (res && res.data) || {}
+        if (!payload.ok) throw new Error(payload.msg || "授权失败")
+        uni.showToast({ title: "已授权", icon: "success" })
+        await this.fetchPermissions()
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || "授权失败", icon: "none" })
+      } finally {
+        this.permissionLoading = false
+      }
+    },
+    revokeAssetReadPermission() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      uni.showModal({
+        title: "撤销权限",
+        content: "确认撤销该用户的资产只读权限吗？",
+        success: async (modalRes) => {
+          if (!modalRes.confirm) return
+          this.permissionLoading = true
+          try {
+            const res = await adminRevokeUserPermission(this.uid, { permissionCode: PERMISSION_ASSET_READ_BASIC })
+            const payload = (res && res.data) || {}
+            if (!payload.ok) throw new Error(payload.msg || "撤销失败")
+            uni.showToast({ title: "已撤销", icon: "success" })
+            await this.fetchPermissions()
+          } catch (e) {
+            uni.showToast({ title: (e && e.message) || "撤销失败", icon: "none" })
+          } finally {
+            this.permissionLoading = false
+          }
+        }
+      })
+    },
     fetchDetail() {
       if (this.uid <= 0) return
       this.loading = true
@@ -171,6 +287,7 @@ export default {
             return
           }
           this.detail = payload.data || {}
+          this.fetchPermissions()
         },
         fail: () => uni.showToast({ title: "请求失败", icon: "none" }),
         complete: () => { this.loading = false }
@@ -188,6 +305,11 @@ export default {
 .metricCard { min-height: 78px; }
 .metricLabel { font-size: 12px; color: #64748b; }
 .metricValue { margin-top: 4px; font-size: 22px; font-weight: 700; color: #0f172a; }
+.permissionMeta { margin-top: 8px; }
+.statusPill { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.statusGranted { background: #ecfdf5; color: #047857; }
+.statusExpired { background: #fff7ed; color: #c2410c; }
+.statusPlain { background: #f8fafc; color: #475569; }
 .sectionLabel { margin-top: 10px; }
 .rowItem { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.2); }
 </style>

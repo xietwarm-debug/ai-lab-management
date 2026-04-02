@@ -2,9 +2,9 @@
   <div class="permission-page">
     <section class="hero-card">
       <div class="hero-copy">
-        <span class="eyebrow">Access Control</span>
+        <span class="eyebrow">权限治理</span>
         <h2>细粒度权限中心</h2>
-        <p>为教师或学生账号按人授予值班员、资产管理员、排课管理员、审计查看员等后台岗位权限。</p>
+        <p>按人配置值班、资产、排课和审计等后台岗位权限，让账号分工更清晰、授权更可控。</p>
       </div>
       <div class="hero-actions">
         <el-button @click="resetFilters">重置</el-button>

@@ -28,31 +28,46 @@ const routes = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/dashboard/index.vue'),
-        meta: { title: '仪表盘', roles: ['admin', 'teacher'] }
+        meta: { title: '\u4eea\u8868\u76d8', roles: ['admin', 'teacher'] }
+      },
+      {
+        path: 'operations-center',
+        name: 'operationsCenter',
+        component: () => import('@/views/operations-center/index.vue'),
+        meta: { title: '\u8fd0\u8425\u4e2d\u5fc3', roles: ['admin', 'teacher'], permissions: [PERMISSION_DUTY_OPERATOR] }
       },
       {
         path: 'todo-center',
         name: 'todoCenter',
-        component: () => import('@/views/todo-center/index.vue'),
-        meta: { title: '待办中心', roles: ['admin'] }
+        redirect: {
+          path: '/operations-center',
+          query: { tab: 'todo' }
+        },
+        meta: { title: '\u5f85\u529e\u4e2d\u5fc3', roles: ['admin'] }
       },
       {
         path: 'notification-center',
         name: 'notificationCenter',
         component: () => import('@/views/notification-center/index.vue'),
-        meta: { title: '通知中心', roles: ['admin'] }
+        meta: { title: '\u901a\u77e5\u4e2d\u5fc3', roles: ['admin'] }
       },
       {
         path: 'operations-board',
         name: 'operationsBoard',
-        component: () => import('@/views/operations-board/index.vue'),
-        meta: { title: '运营看板', roles: ['admin', 'teacher'], permissions: [PERMISSION_DUTY_OPERATOR] }
+        redirect: {
+          path: '/operations-center',
+          query: { tab: 'board' }
+        },
+        meta: { title: '\u8fd0\u8425\u770b\u677f', roles: ['admin', 'teacher'], permissions: [PERMISSION_DUTY_OPERATOR] }
       },
       {
         path: 'duty-emergency',
         name: 'dutyEmergency',
-        component: () => import('@/views/duty-emergency/index.vue'),
-        meta: { title: '值班应急', roles: ['admin'], permissions: [PERMISSION_DUTY_OPERATOR] }
+        redirect: {
+          path: '/operations-center',
+          query: { tab: 'duty' }
+        },
+        meta: { title: '\u503c\u73ed\u5e94\u6025', roles: ['admin'], permissions: [PERMISSION_DUTY_OPERATOR] }
       },
       {
         path: 'lostfound',
@@ -63,14 +78,26 @@ const routes = [
       {
         path: 'ai-assistant',
         name: 'aiAssistant',
-        component: () => import('@/views/ai-assistant/index.vue'),
+        redirect: (to) => ({
+          path: '/ai-knowledge-center',
+          query: { ...to.query, tab: 'assistant' }
+        }),
         meta: { title: 'AI 助手', roles: ['admin'] }
       },
       {
         path: 'knowledge-base',
         name: 'knowledgeBase',
-        component: () => import('@/views/knowledge-base/index.vue'),
+        redirect: (to) => ({
+          path: '/ai-knowledge-center',
+          query: { ...to.query, tab: 'knowledge' }
+        }),
         meta: { title: '知识库管理', roles: ['admin'] }
+      },
+      {
+        path: 'ai-knowledge-center',
+        name: 'aiKnowledgeCenter',
+        component: () => import('@/views/ai-knowledge-center/index.vue'),
+        meta: { title: 'AI 知识助手', roles: ['admin'] }
       },
       {
         path: 'labs',
@@ -91,28 +118,49 @@ const routes = [
         meta: { title: '排课管理', roles: ['admin'], permissions: [PERMISSION_SCHEDULE_MANAGER] }
       },
       {
+        path: 'approval-center',
+        name: 'approvalCenter',
+        component: () => import('@/views/approval-center/index.vue'),
+        meta: { title: '\u5ba1\u6279\u4e2d\u5fc3', roles: ['admin', 'teacher'] }
+      },
+      {
         path: 'reservations',
         name: 'reservations',
-        component: () => import('@/views/reservations/index.vue'),
-        meta: { title: '预约审批', roles: ['admin', 'teacher'] }
+        redirect: {
+          path: '/approval-center',
+          query: { tab: 'reservations' }
+        },
+        meta: { title: '\u9884\u7ea6\u5ba1\u6279', roles: ['admin', 'teacher'] }
       },
       {
         path: 'borrow-approval',
         name: 'borrowApproval',
-        component: () => import('@/views/borrow-approval/index.vue'),
-        meta: { title: '借用审批', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER] }
+        redirect: {
+          path: '/approval-center',
+          query: { tab: 'borrow' }
+        },
+        meta: { title: '\u501f\u7528\u5ba1\u6279', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER] }
       },
       {
         path: 'equipments',
         name: 'equipments',
         component: () => import('@/views/equipments/index.vue'),
-        meta: { title: '资产管理', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER] }
+        meta: { title: '\u8d44\u4ea7\u7ba1\u7406', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER] }
+      },
+      {
+        path: 'warehouses',
+        name: 'warehouses',
+        component: () => import('@/views/warehouses/index.vue'),
+        meta: { title: '仓库管理', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER] }
       },
       {
         path: 'reservation-rules',
         name: 'reservationRules',
-        component: () => import('@/views/reservation-rules/index.vue'),
-        meta: { title: '审批流配置', roles: ['admin'], permissions: [PERMISSION_SCHEDULE_MANAGER] }
+        redirect: {
+          path: '/approval-center',
+          query: { tab: 'rules' }
+        },
+        meta: { title: '\u5ba1\u6279\u6d41\u914d\u7f6e', roles: ['admin'], permissions: [PERMISSION_SCHEDULE_MANAGER] }
       },
       {
         path: 'data-governance',

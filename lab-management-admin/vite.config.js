@@ -7,6 +7,13 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const apiProxy = {
+    '/api': {
+      target: 'http://127.0.0.1:5000',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/api/, '')
+    }
+  }
 
   return {
     plugins: [
@@ -26,15 +33,16 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '0.0.0.0',
-      port: 5173,
+      port: 5175,
+      strictPort: true,
       proxy: env.VITE_API_BASE_URL && /^https?:\/\//.test(env.VITE_API_BASE_URL)
         ? undefined
-        : {
-            '/api': {
-              target: 'http://127.0.0.1:5000',
-              changeOrigin: true
-            }
-          }
-    }
+        : apiProxy
+    },
+    preview: {
+      proxy: env.VITE_API_BASE_URL && /^https?:\/\//.test(env.VITE_API_BASE_URL)
+        ? undefined
+        : apiProxy
+    },
   }
 })

@@ -31,3 +31,225 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+@keyframes adminPageFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section) {
+  opacity: 0;
+  animation: adminPageFadeUp 0.55s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section):nth-child(1) {
+  animation-delay: 0.06s;
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section):nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section):nth-child(3) {
+  animation-delay: 0.22s;
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section):nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+.admin-content > * > *:not(.animate-up):not(.panel-fade-in):not(.overview-section):nth-child(5) {
+  animation-delay: 0.38s;
+}
+
+.page-wrap,
+.reservation-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-head,
+.page-toolbar {
+  position: relative;
+  overflow: hidden;
+  padding: 26px 28px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 36%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
+  box-shadow: var(--app-shadow);
+}
+
+.page-head::after,
+.page-toolbar::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -80px auto;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.16), rgba(45, 212, 191, 0));
+  pointer-events: none;
+}
+
+.page-card,
+.filter-card,
+.table-card {
+  padding: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+
+.page-head,
+.page-toolbar,
+.head-actions,
+.toolbar-actions,
+.table-actions,
+.pager-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-head > div:first-child,
+.toolbar-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.page-head h2,
+.toolbar-copy h2 {
+  margin: 8px 0 10px;
+  font-size: 30px;
+  line-height: 1.2;
+  color: #17202a;
+}
+
+.page-head p,
+.toolbar-copy p {
+  margin: 0;
+  max-width: 760px;
+  color: #5f6b7a;
+  line-height: 1.7;
+}
+
+.page-head .eyebrow,
+.toolbar-copy .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.head-actions,
+.toolbar-actions {
+  position: relative;
+  z-index: 1;
+  flex-wrap: wrap;
+}
+
+.page-card:hover,
+.filter-card:hover,
+.table-card:hover {
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+  transition: box-shadow 0.2s ease;
+}
+
+.admin-content .el-button {
+  border-radius: 12px;
+  font-weight: 600;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.admin-content .el-button:not(.is-text):not(.is-link) {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.admin-content .el-button:not(.is-text):not(.is-link):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
+}
+
+.admin-content .el-button--primary {
+  border-color: #0f766e;
+  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
+}
+
+.admin-content .el-button--primary:hover {
+  border-color: #0f766e;
+  background: linear-gradient(135deg, #0d6d66 0%, #0ea5a5 100%);
+}
+
+.admin-content .summary-row,
+.admin-content .table-actions,
+.admin-content .detail-section-head,
+.admin-content .preview-head {
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.admin-content .pager-row {
+  margin-top: 18px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.admin-content .el-table {
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.admin-content .el-table th.el-table__cell {
+  background: #f8fafc;
+}
+
+.admin-content .el-tag {
+  border-radius: 999px;
+  border: none;
+  font-weight: 600;
+  padding-inline: 10px;
+}
+
+.admin-content .el-empty {
+  padding: 20px 16px;
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fcfdfd 0%, #f8fafc 100%);
+}
+
+@media (max-width: 960px) {
+  .page-head,
+  .page-toolbar,
+  .head-actions,
+  .toolbar-actions,
+  .table-actions,
+  .pager-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .page-head h2,
+  .toolbar-copy h2 {
+    font-size: 26px;
+  }
+}

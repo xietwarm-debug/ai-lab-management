@@ -20,3 +20,6 @@ lab-management-app/unpackage/
 Thumbs.db
 .vscode/
 .idea/
+
+# Generated seed data
+generated/

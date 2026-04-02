@@ -778,8 +778,11 @@ def _normalize_equipment_payload(data):
         raise BizError("name required", 400)
 
     lab_id = _to_int_or_none(payload.get("labId"))
+    warehouse_id = _to_int_or_none(payload.get("warehouseId"))
     if payload.get("labId") not in (None, "") and lab_id is None:
         raise BizError("invalid labId", 400)
+    if payload.get("warehouseId") not in (None, "") and warehouse_id is None:
+        raise BizError("invalid warehouseId", 400)
     allow_borrow = _parse_optional_bool(payload.get("allowBorrow"), "allowBorrow")
 
     return {
@@ -789,6 +792,8 @@ def _normalize_equipment_payload(data):
         "brand": str(payload.get("brand") or "").strip(),
         "labId": lab_id,
         "labName": str(payload.get("labName") or "").strip(),
+        "warehouseId": warehouse_id,
+        "warehouseName": str(payload.get("warehouseName") or "").strip(),
         "status": _normalize_status(payload.get("status")),
         "keeper": str(payload.get("keeper") or "").strip(),
         "purchaseDate": _normalize_purchase_date(payload.get("purchaseDate"), field_name="purchaseDate"),
@@ -801,6 +806,8 @@ def _normalize_equipment_payload(data):
 
 def _format_equipment_row(row):
     row = dict(row or {})
+    row["warehouseId"] = _safe_int(row.get("warehouseId") if "warehouseId" in row else row.get("warehouse_id"))
+    row["warehouseName"] = str(row.get("warehouseName") or row.get("warehouse_name") or "").strip()
     row["createdAt"] = _to_text_time(row.get("createdAt"))
     row["updatedAt"] = _to_text_time(row.get("updatedAt"))
     row["purchaseDate"] = str(row.get("purchaseDate") or "")
@@ -1248,6 +1255,11 @@ def list_equipments():
     lab_id = _to_int_or_none(lab_id_raw)
     if lab_id_raw not in (None, "") and lab_id is None:
         raise BizError("invalid labId", 400)
+        
+    warehouse_id_raw = request.args.get("warehouseId", "")
+    warehouse_id = _to_int_or_none(warehouse_id_raw)
+    if warehouse_id_raw not in (None, "") and warehouse_id is None:
+        raise BizError("invalid warehouseId", 400)
     if status and status not in EQUIPMENT_STATUS_SET:
         raise BizError("invalid status", 400)
     is_borrowed = _parse_optional_bool(request.args.get("isBorrowed"), "isBorrowed")
@@ -1284,12 +1296,27 @@ def list_equipments():
     where_sql = " WHERE 1=1"
     params = []
     if keyword:
-        where_sql += " AND (asset_code LIKE %s OR name LIKE %s OR lab_name LIKE %s OR borrowed_by LIKE %s OR barcode_value LIKE %s)"
+        where_sql += """
+            AND (
+                asset_code LIKE %s
+                OR name LIKE %s
+                OR model LIKE %s
+                OR brand LIKE %s
+                OR lab_name LIKE %s
+                OR keeper LIKE %s
+                OR borrowed_by LIKE %s
+                OR barcode_value LIKE %s
+                OR spec_json LIKE %s
+            )
+        """
         kw = f"%{keyword}%"
-        params.extend([kw, kw, kw, kw, kw])
+        params.extend([kw, kw, kw, kw, kw, kw, kw, kw, kw])
     if lab_id is not None:
         where_sql += " AND lab_id=%s"
         params.append(lab_id)
+    if warehouse_id is not None:
+        where_sql += " AND warehouse_id=%s"
+        params.append(warehouse_id)
     if status:
         where_sql += " AND status=%s"
         params.append(status)
@@ -1334,6 +1361,8 @@ def list_equipments():
                brand,
                lab_id AS labId,
                lab_name AS labName,
+               warehouse_id AS warehouseId,
+               warehouse_name AS warehouseName,
                status,
                keeper,
                purchase_date AS purchaseDate,
@@ -1386,6 +1415,52 @@ def list_equipments():
 @auth_required()
 def get_equipment(eid):
     return jsonify({"ok": True, "data": _find_equipment_or_raise(eid)})
+
+
+@app.get("/asset-portal/equipments")
+@auth_required()
+def list_asset_portal_equipments():
+    current_user = g.current_user or {}
+    if not can_access_basic_asset_data(current_user):
+        raise BizError("permission denied", 403)
+
+    keyword = str(request.args.get("keyword") or "").strip()
+    lab_name = str(request.args.get("labName") or "").strip()
+    status = str(request.args.get("status") or "").strip().lower()
+    if status and status not in EQUIPMENT_STATUS_SET:
+        raise BizError("invalid status", 400)
+
+    is_borrowed = _parse_optional_bool(request.args.get("isBorrowed"), "isBorrowed")
+
+    maintenance_due_days_raw = request.args.get("maintenanceDueDays", "")
+    maintenance_due_days = _to_int_or_none(maintenance_due_days_raw) if maintenance_due_days_raw not in (None, "") else None
+    if maintenance_due_days_raw not in (None, "") and maintenance_due_days is None:
+        raise BizError("invalid maintenanceDueDays", 400)
+    if maintenance_due_days is not None and maintenance_due_days < 0:
+        raise BizError("invalid maintenanceDueDays", 400)
+
+    warranty_due_days_raw = request.args.get("warrantyDueDays", "")
+    warranty_due_days = _to_int_or_none(warranty_due_days_raw) if warranty_due_days_raw not in (None, "") else None
+    if warranty_due_days_raw not in (None, "") and warranty_due_days is None:
+        raise BizError("invalid warrantyDueDays", 400)
+    if warranty_due_days is not None and warranty_due_days < 0:
+        raise BizError("invalid warrantyDueDays", 400)
+
+    page, page_size, _ = _parse_page_and_size(
+        request.args.get("page", "1"),
+        request.args.get("pageSize", "20"),
+    )
+    result = list_basic_asset_records(
+        keyword=keyword,
+        lab_name=lab_name,
+        status=status,
+        is_borrowed=is_borrowed,
+        maintenance_due_days=maintenance_due_days,
+        warranty_due_days=warranty_due_days,
+        page=page,
+        page_size=page_size,
+    )
+    return jsonify({"ok": True, "data": result.get("items") or [], "meta": result.get("meta") or {}})
 
 
 @app.get("/borrow-requests")
@@ -2531,9 +2606,9 @@ def create_equipment():
     new_id = execute_insert(
         """
         INSERT INTO equipment (
-            asset_code, name, model, brand, lab_id, lab_name,
+            asset_code, name, model, brand, lab_id, lab_name, warehouse_id, warehouse_name,
             status, keeper, purchase_date, price, spec_json, image_url, allow_borrow, created_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             payload["assetCode"],
@@ -2542,6 +2617,8 @@ def create_equipment():
             payload["brand"],
             payload["labId"],
             payload["labName"],
+            payload["warehouseId"],
+            payload["warehouseName"],
             payload["status"],
             payload["keeper"],
             payload["purchaseDate"],
@@ -2578,6 +2655,8 @@ def update_equipment(eid):
             brand=%s,
             lab_id=%s,
             lab_name=%s,
+            warehouse_id=%s,
+            warehouse_name=%s,
             status=%s,
             keeper=%s,
             purchase_date=%s,
@@ -2594,6 +2673,8 @@ def update_equipment(eid):
             payload["brand"],
             payload["labId"],
             payload["labName"],
+            payload["warehouseId"],
+            payload["warehouseName"],
             payload["status"],
             payload["keeper"],
             payload["purchaseDate"],
@@ -3452,8 +3533,11 @@ def locate_equipment_by_scan_code():
 def create_inventory_session():
     payload = request.get_json(force=True) or {}
     lab_id = _to_int_or_none(payload.get("labId"))
+    warehouse_id = _to_int_or_none(payload.get("warehouseId"))
     if payload.get("labId") not in (None, "") and lab_id is None:
         raise BizError("invalid labId", 400)
+    if payload.get("warehouseId") not in (None, "") and warehouse_id is None:
+        raise BizError("invalid warehouseId", 400)
     lab_name = _normalize_text(payload.get("labName"), "labName", 128)
     if lab_id is not None and not lab_name:
         lab_name = _resolve_lab_name(lab_id)
@@ -4005,8 +4089,11 @@ def create_repair_order():
         raise BizError("invalid equipmentId", 400)
 
     lab_id = _to_int_or_none(payload.get("labId"))
+    warehouse_id = _to_int_or_none(payload.get("warehouseId"))
     if payload.get("labId") not in (None, "") and lab_id is None:
         raise BizError("invalid labId", 400)
+    if payload.get("warehouseId") not in (None, "") and warehouse_id is None:
+        raise BizError("invalid warehouseId", 400)
     lab_name = str(payload.get("labName") or "").strip()
 
     asset_code = ""
@@ -4501,8 +4588,11 @@ def repair_order_ai_diagnose():
         raise BizError("invalid equipmentId", 400)
 
     lab_id = _to_int_or_none(payload.get("labId"))
+    warehouse_id = _to_int_or_none(payload.get("warehouseId"))
     if payload.get("labId") not in (None, "") and lab_id is None:
         raise BizError("invalid labId", 400)
+    if payload.get("warehouseId") not in (None, "") and warehouse_id is None:
+        raise BizError("invalid warehouseId", 400)
 
     equipment_meta = {}
     lab_meta = {
@@ -4766,3 +4856,421 @@ def import_equipments_csv():
             },
         }
     )
+
+
+# ==========================================
+# Warehouse Management Routes
+# ==========================================
+
+@app.route("/admin/warehouses", methods=["GET"])
+@auth_required(roles=["admin", "teacher"])
+def get_warehouses():
+    page_raw = request.args.get("page")
+    page_size_raw = request.args.get("pageSize")
+    page, page_size, offset = _parse_page_and_size(page_raw, page_size_raw, 1, 20)
+    keyword = str(request.args.get("keyword") or "").strip()
+    status = str(request.args.get("status") or "").strip()
+
+    where_clauses = ["1=1"]
+    params = []
+    if keyword:
+        where_clauses.append("(w.name LIKE %s OR w.location LIKE %s)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    if status:
+        where_clauses.append("w.status = %s")
+        params.append(status)
+
+    where_str = " AND ".join(where_clauses)
+    
+    total_rows = query(f"SELECT COUNT(1) AS cnt FROM warehouse w WHERE {where_str}", params)
+    total_row = total_rows[0] if total_rows else {}
+    total = int((total_row or {}).get("cnt") or 0)
+    
+    rows = query(
+        f'''
+        SELECT w.*, 
+               (SELECT COUNT(1) FROM equipment e WHERE e.warehouse_id = w.id AND e.status != 'scrapped') AS assetCount
+        FROM warehouse w 
+        WHERE {where_str} 
+        ORDER BY w.id DESC LIMIT %s OFFSET %s
+        ''',
+        params + [page_size, offset]
+    )
+    
+    return jsonify({
+        "code": 0,
+        "msg": "ok",
+        "data": {
+            "items": [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "location": r["location"],
+                    "managerId": r["manager_id"],
+                    "managerName": r["manager_name"],
+                    "status": r["status"],
+                    "description": r["description"],
+                    "assetCount": r.get("assetCount", 0),
+                    "createdAt": r["created_at"].strftime("%Y-%m-%d %H:%M:%S") if r.get("created_at") else ""
+                }
+                for r in (rows or [])
+            ],
+            "total": total,
+            "page": page,
+            "pageSize": page_size
+        }
+    })
+
+
+@app.route("/admin/warehouses", methods=["POST"])
+@auth_required(roles=["admin", "teacher"])
+def create_warehouse():
+    data = request.json or {}
+    name = str(data.get("name") or "").strip()
+    location = str(data.get("location") or "").strip()
+    manager_id = _to_int_or_none(data.get("managerId"))
+    manager_name = str(data.get("managerName") or "").strip()
+    status = str(data.get("status") or "active").strip()
+    description = str(data.get("description") or "").strip()
+
+    if not name:
+        return jsonify({"code": 400, "msg": "仓库名称不能为空"}), 400
+
+    new_id = execute_insert(
+        '''
+        INSERT INTO warehouse (name, location, manager_id, manager_name, status, description)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ''',
+        (name, location, manager_id, manager_name, status, description)
+    )
+    return jsonify({"code": 0, "msg": "ok", "data": {"id": new_id}})
+
+
+@app.route("/admin/warehouses/<int:wid>", methods=["PUT"])
+@auth_required(roles=["admin", "teacher"])
+def update_warehouse(wid):
+    data = request.json or {}
+    name = str(data.get("name") or "").strip()
+    location = str(data.get("location") or "").strip()
+    manager_id = _to_int_or_none(data.get("managerId"))
+    manager_name = str(data.get("managerName") or "").strip()
+    status = str(data.get("status") or "").strip()
+    description = str(data.get("description") or "").strip()
+
+    if not name:
+        return jsonify({"code": 400, "msg": "仓库名称不能为空"}), 400
+
+    execute(
+        '''
+        UPDATE warehouse 
+        SET name=%s, location=%s, manager_id=%s, manager_name=%s, status=%s, description=%s
+        WHERE id=%s
+        ''',
+        (name, location, manager_id, manager_name, status, description, wid)
+    )
+    return jsonify({"code": 0, "msg": "ok"})
+
+
+@app.route("/admin/warehouses/<int:wid>", methods=["DELETE"])
+@auth_required(roles=["admin", "teacher"])
+def delete_warehouse(wid):
+    # Check if there are assets
+    asset_count_rows = query("SELECT COUNT(1) as cnt FROM equipment WHERE warehouse_id=%s AND status != 'scrapped'", (wid,))
+    asset_count = asset_count_rows[0] if asset_count_rows else None
+    if asset_count and asset_count["cnt"] > 0:
+        return jsonify({"code": 400, "msg": "该仓库下仍有未报废的资产，无法删除"}), 400
+        
+    execute("DELETE FROM warehouse WHERE id=%s", (wid,))
+    return jsonify({"code": 0, "msg": "ok"})
+
+
+# ==========================================
+# Asset Transfer Routes
+# ==========================================
+
+@app.route("/admin/assets/transfer", methods=["POST"])
+@auth_required(roles=["admin", "teacher"])
+def transfer_asset():
+    data = request.json or {}
+    asset_ids = data.get("assetIds", [])
+    if not isinstance(asset_ids, list) or not asset_ids:
+        return jsonify({"code": 400, "msg": "请选择要调拨的资产"}), 400
+
+    target_type = str(data.get("targetType") or "").strip() # 'lab' or 'warehouse'
+    target_id = _to_int_or_none(data.get("targetId"))
+    reason = str(data.get("reason") or "").strip()
+    
+    if target_type not in ["lab", "warehouse"] or not target_id:
+        return jsonify({"code": 400, "msg": "必须指定有效的目标实验室或仓库"}), 400
+
+    actor = g.current_user
+    operator_id = actor["id"]
+    operator_name = actor.get("username", "")
+
+    # Fetch target details
+    to_lab_id = None
+    to_lab_name = ""
+    to_warehouse_id = None
+    to_warehouse_name = ""
+    
+    if target_type == "lab":
+        l_rows = query("SELECT name FROM lab WHERE id=%s", (target_id,))
+        l_row = l_rows[0] if l_rows else None
+        if not l_row:
+             return jsonify({"code": 404, "msg": "目标实验室不存在"}), 404
+        to_lab_id = target_id
+        to_lab_name = l_row["name"]
+    else:
+        w_rows = query("SELECT name FROM warehouse WHERE id=%s", (target_id,))
+        w_row = w_rows[0] if w_rows else None
+        if not w_row:
+             return jsonify({"code": 404, "msg": "目标仓库不存在"}), 404
+        to_warehouse_id = target_id
+        to_warehouse_name = w_row["name"]
+
+    success_count = 0
+    for aid in set(asset_ids):
+        asset = query_one("SELECT id, asset_code, name, lab_id, lab_name, warehouse_id, warehouse_name FROM equipment WHERE id=%s", (aid,))
+        if not asset:
+            continue
+            
+        # Record transfer
+        execute_insert(
+            '''
+            INSERT INTO asset_transfer_record (
+                asset_type, asset_id, asset_code, asset_name,
+                from_lab_id, from_lab_name, from_warehouse_id, from_warehouse_name,
+                to_lab_id, to_lab_name, to_warehouse_id, to_warehouse_name,
+                operator_id, operator_name, reason
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''',
+            (
+                "equipment", asset["id"], asset["asset_code"], asset["name"],
+                asset.get("lab_id"), asset.get("lab_name", ""),
+                asset.get("warehouse_id"), asset.get("warehouse_name", ""),
+                to_lab_id, to_lab_name, to_warehouse_id, to_warehouse_name,
+                operator_id, operator_name, reason
+            )
+        )
+        
+        # Update asset
+        execute(
+            '''
+            UPDATE equipment 
+            SET lab_id=%s, lab_name=%s, warehouse_id=%s, warehouse_name=%s 
+            WHERE id=%s
+            ''',
+            (to_lab_id, to_lab_name, to_warehouse_id, to_warehouse_name, asset["id"])
+        )
+        
+        # Also add an event log
+        execute_insert(
+            "INSERT INTO equipment_event (equipment_id, event_type, operator_id, operator_name, note) VALUES (%s, %s, %s, %s, %s)",
+            (asset["id"], "transfer", operator_id, operator_name, f"调拨到 {'实验室' if target_type == 'lab' else '仓库'}: {to_lab_name or to_warehouse_name}。原因：{reason}")
+        )
+        success_count += 1
+        
+    return jsonify({"code": 0, "msg": "ok", "data": {"successCount": success_count}})
+
+
+@app.route("/admin/assets/<int:aid>/transfers", methods=["GET"])
+@auth_required(roles=["admin", "teacher"])
+def get_asset_transfers(aid):
+    rows = query(
+        "SELECT * FROM asset_transfer_record WHERE asset_id=%s AND asset_type='equipment' ORDER BY transfer_date DESC",
+        (aid,)
+    )
+    items = []
+    for r in (rows or []):
+        items.append({
+            "id": r["id"],
+            "operatorName": r["operator_name"],
+            "transferDate": r["transfer_date"].strftime("%Y-%m-%d %H:%M:%S") if r.get("transfer_date") else "",
+            "fromLabName": r.get("from_lab_name"),
+            "fromWarehouseName": r.get("from_warehouse_name"),
+            "toLabName": r.get("to_lab_name"),
+            "toWarehouseName": r.get("to_warehouse_name"),
+            "reason": r.get("reason"),
+        })
+    return jsonify({"code": 0, "msg": "ok", "data": {"items": items}})
+
+@app.post("/agent/import-assets/execute")
+@auth_required()
+def execute_asset_import():
+    data = request.get_json(force=True) or {}
+    task_id = str(data.get("task_id") or "").strip()
+    if not task_id or not hasattr(app, "import_cache") or task_id not in app.import_cache:
+        return jsonify({"code": 400, "msg": "导入任务已过期或不存在"}), 400
+    
+    task_data = app.import_cache.pop(task_id)
+    file_ids = task_data.get("file_ids", [])
+    mapping = task_data.get("mapping", {})
+    user_name = task_data.get("user_name", "")
+    
+    if not mapping or not file_ids:
+        return jsonify({"code": 400, "msg": "导入失败：缺少文件或映射数据"}), 400
+        
+    placeholders = ",".join(["%s"] * len(file_ids))
+    file_rows = query(
+        f"SELECT store_path, file_ext FROM agent_file WHERE id IN ({placeholders})",
+        tuple(file_ids)
+    )
+    
+    import pandas as pd
+    import os
+    import uuid
+    from datetime import datetime
+    from modular.core import UPLOAD_DIR
+    
+    success_count = 0
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    lab_cache = {}
+    wh_cache = {}
+
+    def get_lab_id(name):
+        if not name: return 0
+        if name in lab_cache: return lab_cache[name]
+        q = query("SELECT id FROM lab WHERE name = %s LIMIT 1", (name,))
+        if q:
+            lab_cache[name] = q[0]["id"]
+            return q[0]["id"]
+        q2 = query("SELECT id FROM lab WHERE name LIKE %s LIMIT 1", ("%" + name + "%",))
+        lid = q2[0]["id"] if q2 else 0
+        lab_cache[name] = lid
+        return lid
+
+    def get_warehouse_id(name):
+        if not name: return 0
+        if name in wh_cache: return wh_cache[name]
+        q = query("SELECT id FROM warehouse WHERE name = %s LIMIT 1", (name,))
+        if q:
+            wh_cache[name] = q[0]["id"]
+            return q[0]["id"]
+        q2 = query("SELECT id FROM warehouse WHERE name LIKE %s LIMIT 1", ("%" + name + "%",))
+        wid = q2[0]["id"] if q2 else 0
+        wh_cache[name] = wid
+        return wid
+
+    for fr in (file_rows or []):
+        fpath = str(fr.get("store_path") or "").strip()
+        ext = str(fr.get("file_ext") or "").strip().lower()
+        if not fpath or ext not in [".xlsx", ".xls", ".csv"]:
+            continue
+            
+        abs_path = os.path.join(UPLOAD_DIR, fpath)
+        try:
+            if ext == ".csv":
+                df = pd.read_csv(abs_path)
+            else:
+                df = pd.read_excel(abs_path)
+                
+            for _, row in df.iterrows():
+                row_dict = row.to_dict()
+                asset_name = ""
+                category = "通用设备"
+                location = ""
+                status = "active"
+                price = 0.0
+                model_str = ""
+                brand_str = ""
+                
+                for col, val in row_dict.items():
+                    if pd.isna(val) or val is None:
+                        continue
+                    v_str = str(val).strip()
+                    if not v_str:
+                        continue
+                        
+                    sys_field = mapping.get(str(col).strip())
+                    if not sys_field:
+                        for k, v in mapping.items():
+                            if k == str(col).strip():
+                                sys_field = v; break
+                            if v == str(col).strip():
+                                sys_field = k; break
+                                
+                    if sys_field == "asset_name":
+                        asset_name = v_str
+                    elif sys_field == "category":
+                        category = v_str
+                    elif sys_field in ["location", "lab_name", "warehouse_name"]:
+                        location = v_str
+                    elif sys_field == "status":
+                        status = v_str
+                    elif sys_field == "price":
+                        try:
+                            price = float(v_str.replace("￥", "").replace(",", ""))
+                        except ValueError:
+                            pass
+                    elif sys_field == "model":
+                        model_str = v_str
+                    elif sys_field == "brand":
+                        brand_str = v_str
+
+                if not asset_name:
+                    continue
+                    
+                asset_code = "IMP-" + uuid.uuid4().hex[:8].upper()
+                if "闲置" in status or "在库" in status:
+                    status = "idle"
+                elif "修" in status:
+                    status = "repair"
+                elif "废" in status:
+                    status = "scrapped"
+                else:
+                    status = "active"
+                
+                lab_n = location 
+                wh_n = ""
+                if "仓库" in location:
+                    wh_n = location
+                    lab_n = ""
+                elif "实验室" in location or "中心" not in location:
+                    wh_n = ""
+                    lab_n = location
+                else:
+                    wh_n = location
+                    lab_n = ""
+                
+                lab_id = get_lab_id(lab_n)
+                wh_id = get_warehouse_id(wh_n)
+                
+                # Verify if ID is 0, maybe the other one has it
+                if wh_id == 0 and lab_id == 0:
+                    temp_l = get_lab_id(location)
+                    temp_w = get_warehouse_id(location)
+                    if temp_w > 0:
+                        wh_id = temp_w
+                        wh_n = location
+                        lab_n = ""
+                    elif temp_l > 0:
+                        lab_id = temp_l
+                        lab_n = location
+                        wh_n = ""
+
+                execute_insert(
+                    '''
+                    INSERT INTO equipment (
+                        asset_code, name, model, brand, lab_id, lab_name, warehouse_id, warehouse_name,
+                        status, keeper, purchase_date, price, spec_json, image_url, allow_borrow, created_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''',
+                    (
+                        asset_code, asset_name, model_str, brand_str, lab_id, lab_n, wh_id, wh_n,
+                        status, user_name, now_text, price, "{}", "", 1, now_text
+                    )
+                )
+                success_count += 1
+                
+        except Exception as e:
+            print(f"Error parsing file {fpath} during import: {e}")
+            pass
+            
+    return jsonify({
+        "code": 0, 
+        "msg": "ok", 
+        "data": {
+            "imported_count": success_count
+        }
+    })

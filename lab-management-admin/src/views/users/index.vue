@@ -2,6 +2,7 @@
   <div class="page-wrap">
     <section class="page-head">
       <div>
+        <span class="eyebrow">账号治理</span>
         <h2>用户管理</h2>
         <p>支持单个创建、批量生成学生账号、文本导入、毕业生批量停用，以及现有账号治理能力。</p>
       </div>
@@ -316,6 +317,56 @@
               </template>
             </el-table>
           </section>
+          <section class="detail-section">
+            <div class="detail-section-head">
+              <h3>通用权限</h3>
+              <el-button size="small" :loading="permissionLoading" @click="refreshDetailPermissions">刷新</el-button>
+            </div>
+            <el-table :data="detailPermissionRows" size="small">
+              <el-table-column prop="permissionCode" label="权限码" min-width="220" />
+              <el-table-column label="状态" width="140">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="permissionTagType(row)">{{ permissionStatusLabel(row) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="来源" width="140">
+                <template #default="{ row }">
+                  {{ permissionSourceLabel(row) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="过期时间" min-width="180">
+                <template #default="{ row }">
+                  {{ row.expiresAt || (row.granted ? "长期有效" : "-") }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    type="primary"
+                    :disabled="!canGrantAiPermission(detail?.user)"
+                    :loading="permissionLoading"
+                    @click="handleGrantPermission(row.permissionCode)"
+                  >
+                    授权
+                  </el-button>
+                  <el-button
+                    link
+                    type="danger"
+                    :disabled="!canRevokeAiPermission(detail?.user, row)"
+                    :loading="permissionLoading"
+                    @click="handleRevokePermission(row.permissionCode)"
+                  >
+                    撤销
+                  </el-button>
+                </template>
+              </el-table-column>
+              <template #empty>
+                <el-empty description="暂无通用权限信息" :image-size="70" />
+              </template>
+            </el-table>
+            <p class="detail-tip">当前页面仅开放 `asset.read_basic` 的查看、授权与撤销。</p>
+          </section>
         </template>
 
         <el-empty v-else description="暂无用户详情" />
@@ -524,21 +575,26 @@ import {
   freezeUser,
   getUserAiPermissions,
   getUserDetail,
+  getUserPermissions,
   getUserGovernanceStats,
   getUsers,
   grantUserAiPermission,
+  grantUserPermission,
   importUsers,
   resetUserPassword,
   revokeUserAiPermission,
+  revokeUserPermission,
   setUserRole,
   unfreezeUser
 } from '@/api/users'
 
 const AI_RESERVATION_VIEW_OWNER = 'ai.reservation.view_owner'
+const PERMISSION_ASSET_READ_BASIC = 'asset.read_basic'
 
 const loading = ref(false)
 const detailLoading = ref(false)
 const aiPermissionLoading = ref(false)
+const permissionLoading = ref(false)
 const createLoading = ref(false)
 const batchPreviewLoading = ref(false)
 const batchSubmitLoading = ref(false)
@@ -669,6 +725,11 @@ const governanceCards = computed(() => [
 const detailAiPermissionRows = computed(() => {
   const items = Array.isArray(detail.value?.aiPermissions) ? detail.value.aiPermissions : []
   return items.filter((item) => item.permissionCode === AI_RESERVATION_VIEW_OWNER)
+})
+
+const detailPermissionRows = computed(() => {
+  const items = Array.isArray(detail.value?.permissions) ? detail.value.permissions : []
+  return items.filter((item) => item.permissionCode === PERMISSION_ASSET_READ_BASIC)
 })
 
 function resetCreateForm() {
@@ -876,6 +937,7 @@ async function viewDetail(row) {
   try {
     const response = await getUserDetail(row.id, { limit: 20 })
     detail.value = response.data?.data || null
+    await Promise.all([refreshDetailAiPermissions(), refreshDetailPermissions()])
   } finally {
     detailLoading.value = false
   }
@@ -904,6 +966,29 @@ function aiPermissionSourceLabel(row) {
   return '未授权'
 }
 
+function permissionStatusLabel(row) {
+  if (row?.granted) {
+    return row?.source === 'role_default' ? '默认拥有' : '已授权'
+  }
+  if (row?.source === 'expired') {
+    return '已过期'
+  }
+  return '未授权'
+}
+
+function permissionTagType(row) {
+  if (row?.granted) return 'success'
+  if (row?.source === 'expired') return 'warning'
+  return 'info'
+}
+
+function permissionSourceLabel(row) {
+  if (row?.source === 'role_default') return '角色默认'
+  if (row?.source === 'user_grant') return '管理员授权'
+  if (row?.source === 'expired') return '授权过期'
+  return '未授权'
+}
+
 function canGrantAiPermission(user) {
   const role = String(user?.role || '').trim()
   return role === 'teacher' || role === 'student'
@@ -928,6 +1013,23 @@ async function refreshDetailAiPermissions() {
     }
   } finally {
     aiPermissionLoading.value = false
+  }
+}
+
+async function refreshDetailPermissions() {
+  const userId = Number(detail.value?.user?.id || 0)
+  if (!userId) return
+  permissionLoading.value = true
+  try {
+    const response = await getUserPermissions(userId)
+    const items = response.data?.data?.items || []
+    if (!detail.value) detail.value = {}
+    detail.value = {
+      ...detail.value,
+      permissions: Array.isArray(items) ? items : []
+    }
+  } finally {
+    permissionLoading.value = false
   }
 }
 
@@ -982,6 +1084,60 @@ async function handleRevokeAiPermission(permissionCode) {
     ElMessage.success('AI 权限已撤销')
   } finally {
     aiPermissionLoading.value = false
+  }
+}
+
+async function handleGrantPermission(permissionCode) {
+  const user = detail.value?.user || {}
+  if (!canGrantAiPermission(user)) {
+    ElMessage.warning('浠呮敮鎸佺粰鏁欏笀鎴栧鐢熸巿鏉?')
+    return
+  }
+  let promptResult
+  try {
+    promptResult = await ElMessageBox.prompt(
+      '鍙暀绌鸿〃绀洪暱鏈熸湁鏁堬紱濡傞渶璁剧疆杩囨湡鏃堕棿锛岃杈撳叆 YYYY-MM-DD HH:mm:ss銆?',
+      '鎺堟潈閫氱敤鏉冮檺',
+      {
+        confirmButtonText: '鎺堟潈',
+        cancelButtonText: '鍙栨秷',
+        inputValue: '',
+        inputPlaceholder: '渚嬪锛?026-03-31 23:59:59',
+        inputPattern: /^$|^\d{4}-\d{2}-\d{2}(?:\s|T)\d{2}:\d{2}:\d{2}$/,
+        inputErrorMessage: '璇疯緭鍏?YYYY-MM-DD HH:mm:ss锛屾垨鐣欑┖'
+      }
+    )
+  } catch (error) {
+    return
+  }
+  permissionLoading.value = true
+  try {
+    const expiresAt = String(promptResult?.value || '').trim()
+    await grantUserPermission(user.id, {
+      permissionCode,
+      expiresAt: expiresAt || undefined
+    })
+    await refreshDetailPermissions()
+    ElMessage.success('閫氱敤鏉冮檺宸叉巿鏉?')
+  } finally {
+    permissionLoading.value = false
+  }
+}
+
+async function handleRevokePermission(permissionCode) {
+  const user = detail.value?.user || {}
+  if (!canGrantAiPermission(user)) {
+    ElMessage.warning('浠呮敮鎸佹挙閿€鏁欏笀鎴栧鐢熺殑閫氱敤鏉冮檺')
+    return
+  }
+  await ElMessageBox.confirm('纭鎾ら攢璇ョ敤鎴风殑閫氱敤鏉冮檺鍚楋紵', '鎾ら攢閫氱敤鏉冮檺', { type: 'warning' })
+  permissionLoading.value = true
+  try {
+    await revokeUserPermission(user.id, { permissionCode })
+    await refreshDetailPermissions()
+    ElMessage.success('閫氱敤鏉冮檺宸叉挙閿€')
+  } finally {
+    permissionLoading.value = false
   }
 }
 
@@ -1185,10 +1341,32 @@ onMounted(() => {
 .page-head,
 .page-card {
   padding: 24px;
-  border: 1px solid var(--app-border);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 24px;
-  background: var(--app-surface);
   box-shadow: var(--app-shadow);
+}
+
+.page-head {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 36%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
+}
+
+.page-head::after {
+  content: '';
+  position: absolute;
+  right: -36px;
+  bottom: -84px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0));
+}
+
+.page-card {
+  background: var(--app-surface);
 }
 
 .page-head,
@@ -1203,11 +1381,14 @@ onMounted(() => {
 }
 
 .head-actions {
+  position: relative;
+  z-index: 1;
   flex-wrap: wrap;
 }
 
 .page-head h2 {
-  margin: 0 0 8px;
+  margin: 8px 0 10px;
+  font-size: 30px;
 }
 
 .page-head p,
@@ -1215,6 +1396,19 @@ onMounted(() => {
 .dialog-hint {
   margin: 0;
   color: var(--app-muted);
+  line-height: 1.7;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .filter-form {

@@ -1,911 +1,767 @@
-<template>
-  <div class="page-container">
-    <!-- 顶部概览与控制区 -->
-    <div class="overview-section">
-      <div class="header-row">
-        <div class="title-area">
-          <span class="eyebrow">统一消息流</span>
-          <h1 class="page-title">通知中心</h1>
-          <p class="page-desc">
-            把公告、借用提醒、预约审批、门禁提醒和异常预警汇总到一处，支持已读未读、类型筛选和批量处理。
-            <span class="update-time">最近刷新 {{ lastUpdated || '-' }}</span>
-          </p>
-        </div>
-        <div class="action-area">
-          <el-button @click="markShownAsRead" :disabled="!filteredItems.length" :icon="Check">标记当前已读</el-button>
-          <el-button type="primary" :loading="loading" @click="fetchAll" :icon="RefreshRight">刷新消息流</el-button>
+﻿<template>
+  <div class="dashboard-page">
+    <section class="hero-card">
+      <div>
+        <p class="eyebrow">管理总览</p>
+        <h1>仪表盘</h1>
+        <p class="hero-desc">
+          聚合核心指标、风险提醒和快捷入口，帮助{{ roleLabel }}快速了解当前运行状态。
+        </p>
+        <div class="hero-meta">
+          <span>当前账号 {{ authStore.username || '-' }}</span>
+          <span>角色 {{ roleLabel }}</span>
+          <span>最近更新 {{ lastUpdatedText }}</span>
         </div>
       </div>
-
-      <!-- 数据指标卡片网格 -->
-      <div class="stats-grid">
-        <div 
-          v-for="item in metricCards" 
-          :key="item.key" 
-          class="stat-card"
-          :class="[`is-${item.colorType}`, { 'has-unread': item.unread > 0 }]"
-        >
-          <div class="stat-info">
-            <span class="stat-label">{{ item.label }}</span>
-            <span v-if="item.unread > 0" class="unread-badge">未读 {{ item.unread }}</span>
-          </div>
-          <div class="stat-value">{{ item.value }}</div>
-        </div>
+      <div class="hero-actions">
+        <el-button @click="fetchDashboard" :loading="loading" :icon="RefreshRight">刷新仪表盘</el-button>
+        <el-button type="primary" @click="goTo(primaryAction.path)">{{ primaryAction.label }}</el-button>
       </div>
-    </div>
+    </section>
 
-    <!-- 列表控制栏 -->
-    <div class="control-bar">
-      <div class="filter-group">
-        <el-radio-group v-model="typeFilter" size="large" class="custom-radio">
-          <el-radio-button v-for="item in typeOptions" :key="item.value" :label="item.value">
-            {{ item.label }}
-          </el-radio-button>
-        </el-radio-group>
-
-        <el-divider direction="vertical" />
-
-        <el-radio-group v-model="readFilter" size="large" class="custom-radio light-radio">
-          <el-radio-button label="all">全部</el-radio-button>
-          <el-radio-button label="unread">未读</el-radio-button>
-          <el-radio-button label="read">已读</el-radio-button>
-        </el-radio-group>
-      </div>
-
-      <div class="search-group">
-        <el-input
-          v-model="keyword"
-          placeholder="搜索标题、消息内容、实验室或申请人"
-          :prefix-icon="Search"
-          clearable
-          class="custom-search"
-        />
-      </div>
-    </div>
-
-    <!-- 批量操作栏 -->
-    <div class="batch-bar">
-      <span class="select-info">已选 <strong>{{ selectedIds.length }}</strong> 条</span>
-      <div class="batch-actions">
-        <el-button link @click="toggleSelectAll">
-          {{ isAllShownSelected ? '取消全选' : '全选当前列表' }}
-        </el-button>
-        <el-button link @click="markBatch(true)" :disabled="!selectedIds.length">批量已读</el-button>
-        <el-button link @click="markBatch(false)" :disabled="!selectedIds.length">批量未读</el-button>
-        <el-button
-          size="small"
-          type="primary"
-          plain
-          :loading="batchProcessing"
-          :disabled="!selectedProcessableCount"
-          @click="processSelected"
-        >
-          批量处理 {{ selectedProcessableCount }} 条
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 消息列表区 -->
-    <div v-if="filteredItems.length" class="message-list">
-      <div 
-        v-for="item in filteredItems" 
-        :key="item.id" 
-        class="message-card"
-        :class="{ 'is-read': isRead(item), 'is-selected': isSelected(item.id) }"
+    <section class="metric-grid">
+      <article
+        v-for="item in summaryCards"
+        :key="item.key"
+        class="metric-card"
+        :class="item.tone"
       >
-        <div class="card-left">
-          <el-checkbox class="msg-checkbox" :model-value="isSelected(item.id)" @change="toggleSelect(item.id)" />
-          <div class="msg-content">
-            <div class="msg-header">
-              <el-tag :type="item.tagType" size="small" effect="light" class="custom-tag">
-                {{ item.typeLabel }}
-              </el-tag>
-              <h3 class="msg-title">{{ item.title }}</h3>
-              <span v-if="!isRead(item)" class="status-dot"></span>
-              
-              <!-- 级别/状态 Badge -->
-              <span class="severity-badge" :class="`badge-${item.statusType}`">
-                {{ item.statusLabel }}
-              </span>
-            </div>
-            <p class="msg-desc">{{ item.subtitle }}</p>
-            <p class="msg-detail">{{ item.message }}</p>
-          </div>
-        </div>
+        <span class="metric-label">{{ item.label }}</span>
+        <strong class="metric-value">{{ item.value }}</strong>
+        <span class="metric-sub">{{ item.description }}</span>
+      </article>
+    </section>
 
-        <div class="card-right">
-          <div class="msg-time">{{ item.createdAt || '-' }}</div>
-          <div class="msg-actions">
-            <el-button link type="info" class="hover-btn" @click="goItem(item)">查看详情</el-button>
-            <el-button link type="primary" class="hover-btn" @click="toggleRead(item)">
-              {{ isRead(item) ? '标记未读' : '标记已读' }}
-            </el-button>
-            <el-button
-              v-if="item.processable"
-              link
-              type="primary"
-              :loading="processingIds[item.id]"
-              @click="processItem(item)"
-            >
-              {{ item.processLabel }}
-            </el-button>
+    <section class="panel-grid">
+      <article class="panel-card panel-span-2">
+        <div class="panel-head">
+          <div>
+            <h3>业务概览</h3>
+            <span>按模块查看当前压力点与库存状态</span>
           </div>
         </div>
-      </div>
-    </div>
-    
-    <div v-else class="empty-state">
-      <el-empty description="当前筛选条件下暂无消息" />
-    </div>
+        <div class="overview-grid">
+          <div v-for="item in businessCards" :key="item.key" class="overview-item">
+            <div class="overview-top">
+              <strong>{{ item.label }}</strong>
+              <el-tag size="small" :type="item.tagType">{{ item.tagText }}</el-tag>
+            </div>
+            <div class="overview-value">{{ item.value }}</div>
+            <p>{{ item.detail }}</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h3>快捷入口</h3>
+            <span>保留最常用的后台动作</span>
+          </div>
+        </div>
+        <div class="quick-list">
+          <button
+            v-for="item in quickActions"
+            :key="item.path"
+            type="button"
+            class="quick-item"
+            @click="goTo(item.path)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.desc }}</span>
+          </button>
+        </div>
+      </article>
+
+      <article class="panel-card panel-span-2">
+        <div class="panel-head">
+          <div>
+            <h3>近 7 天预约趋势</h3>
+            <span>帮助判断高峰时段与审批压力</span>
+          </div>
+        </div>
+        <div v-if="trendRows.length" class="trend-grid">
+          <div v-for="item in trendRows" :key="item.date" class="trend-col">
+            <span class="trend-label">{{ item.label }}</span>
+            <div class="trend-bar-wrap">
+              <span class="trend-bar" :style="{ height: `${item.height}%` }" />
+            </div>
+            <span class="trend-value">{{ item.value }}</span>
+          </div>
+        </div>
+        <el-empty v-else description="暂无趋势数据" :image-size="60" />
+      </article>
+
+      <article class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h3>热门实验室</h3>
+            <span>近 30 天使用热度排名</span>
+          </div>
+        </div>
+        <div v-if="topLabs.length" class="rank-list">
+          <div v-for="(item, index) in topLabs" :key="item.labId || item.labName || index" class="rank-item">
+            <span class="rank-index">{{ index + 1 }}</span>
+            <div class="rank-copy">
+              <strong>{{ item.labName || '未命名实验室' }}</strong>
+              <span>{{ item.reservationCount || 0 }} 次预约 / {{ item.userCount || 0 }} 人使用</span>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else description="暂无实验室热度数据" :image-size="60" />
+      </article>
+
+      <article class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h3>最新公告</h3>
+            <span>最近发布或排期的通知</span>
+          </div>
+          <el-button link type="primary" @click="goTo('/announcements')">查看全部</el-button>
+        </div>
+        <div v-if="recentAnnouncements.length" class="timeline-list">
+          <div v-for="item in recentAnnouncements" :key="item.id" class="timeline-item">
+            <strong>{{ item.title || '未命名公告' }}</strong>
+            <span>{{ item.publishTime || item.createdAt || '-' }}</span>
+          </div>
+        </div>
+        <el-empty v-else description="暂无公告" :image-size="60" />
+      </article>
+
+      <article class="panel-card">
+        <div class="panel-head">
+          <div>
+            <h3>最近审计日志</h3>
+            <span>便于快速确认近期关键操作</span>
+          </div>
+          <el-button link type="primary" @click="goTo('/audit-logs')">查看全部</el-button>
+        </div>
+        <div v-if="recentAudit.length" class="timeline-list">
+          <div v-for="(item, index) in recentAudit" :key="`${item.createdAt}-${index}`" class="timeline-item">
+            <strong>{{ item.action || '系统操作' }}</strong>
+            <span>{{ item.createdAt || '-' }}</span>
+          </div>
+        </div>
+        <el-empty v-else description="暂无审计记录" :image-size="60" />
+      </article>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { Check, RefreshRight, Search } from '@element-plus/icons-vue'
+import { computed, onMounted, ref } from 'vue'
+import { RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-
-// 假设这些是你实际项目中的 API 和 Store
-import { getAdminAnnouncements, updateAnnouncement } from '@/api/announcements'
-import { getAdminAiRiskAlerts } from '@/api/ai'
-import { approveBorrowRequest, getBorrowRequests, remindBorrowRequest } from '@/api/borrow'
-import { approveReservation, getReservationList } from '@/api/reservations'
-import { confirmDoorReminderOpen, getDoorRemindersToday } from '@/api/schedule'
+import { getAdminDashboard, getWorkbenchOverview } from '@/api/overview'
 import { useAuthStore } from '@/stores/auth'
-import { resolveAdminJumpUrl } from '@/utils/admin-links'
+import {
+  PERMISSION_ASSET_MANAGER,
+  PERMISSION_AUDIT_VIEWER,
+  PERMISSION_DUTY_OPERATOR,
+  PERMISSION_SCHEDULE_MANAGER,
+  ROLE_LABEL_MAP
+} from '@/utils/constants'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const loading = ref(false)
-const batchProcessing = ref(false)
-const lastUpdated = ref('')
-const allItems = ref([])
-const selectedIds = ref([])
-const keyword = ref('')
-const typeFilter = ref('all')
-const readFilter = ref('all')
-const readState = ref({})
-const processingIds = reactive({})
+const adminDashboard = ref({})
+const workbenchOverview = ref({})
 
-const typeOptions = [
-  { value: 'all', label: '全部' },
-  { value: 'announcement', label: '公告' },
-  { value: 'reservation', label: '预约审批' },
-  { value: 'asset_borrow', label: '借用提醒' },
-  { value: 'door_reminder', label: '门禁提醒' },
-  { value: 'risk_alert', label: '异常预警' }
-]
-
-const storageKey = computed(() => `admin_notification_center_${authStore.username || 'default'}`)
-
-const filteredItems = computed(() => {
-  const text = keyword.value.trim().toLowerCase()
-  return allItems.value.filter((item) => {
-    if (typeFilter.value !== 'all' && item.type !== typeFilter.value) return false
-    const read = isRead(item)
-    if (readFilter.value === 'read' && !read) return false
-    if (readFilter.value === 'unread' && read) return false
-    if (!text) return true
-    const haystack = [item.title, item.subtitle, item.message, item.statusLabel]
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(text)
-  })
-})
-
-const unreadTotal = computed(() => allItems.value.filter((item) => !isRead(item)).length)
-const isAllShownSelected = computed(() => (
-  filteredItems.value.length > 0 && filteredItems.value.every((item) => selectedIds.value.includes(item.id))
+const isAdmin = computed(() => authStore.role === 'admin')
+const lastUpdatedText = computed(() => (
+  adminDashboard.value.generatedAt
+  || workbenchOverview.value.lastUpdated
+  || '-'
 ))
-const selectedItems = computed(() => allItems.value.filter((item) => selectedIds.value.includes(item.id)))
-const selectedProcessableCount = computed(() => selectedItems.value.filter((item) => item.processable).length)
+const roleLabel = computed(() => ROLE_LABEL_MAP[authStore.role] || authStore.role || '未知角色')
 
-// 【UI优化】增强了 metricCards 数据结构，加入了 UI 颜色标识 colorType 和 unread 计数
-const metricCards = computed(() => {
-  const build = (type, label, colorType) => {
-    const rows = allItems.value.filter((item) => item.type === type)
-    const unreadCount = rows.filter((item) => !isRead(item)).length
+const adminOverview = computed(() => adminDashboard.value.overview || {})
+const adminLabs = computed(() => adminDashboard.value.labs || {})
+const adminReservations = computed(() => adminDashboard.value.reservations || {})
+const adminEquipment = computed(() => adminDashboard.value.equipment || {})
+const adminRepair = computed(() => adminDashboard.value.repair || {})
+const adminLostFound = computed(() => adminDashboard.value.lostFound || {})
+const overviewMetrics = computed(() => workbenchOverview.value.metrics || {})
+const topLabs = computed(() => Array.isArray(adminDashboard.value.topLabs30d) ? adminDashboard.value.topLabs30d.slice(0, 5) : [])
+const recentAnnouncements = computed(() => Array.isArray(adminDashboard.value.announcements?.recent) ? adminDashboard.value.announcements.recent.slice(0, 5) : [])
+const recentAudit = computed(() => Array.isArray(adminDashboard.value.recentAudit) ? adminDashboard.value.recentAudit.slice(0, 5) : [])
+
+const primaryAction = computed(() => {
+  if (isAdmin.value) {
     return {
-      key: type,
-      label,
-      value: rows.length,
-      unread: unreadCount,
-      colorType: colorType
+      label: Number(overviewMetrics.value.pendingCount || 0) > 0 ? '进入待办中心' : '查看通知中心',
+      path: Number(overviewMetrics.value.pendingCount || 0) > 0 ? '/todo-center' : '/notification-center'
     }
   }
+  return {
+    label: '查看预约审批',
+    path: '/reservations'
+  }
+})
+
+const summaryCards = computed(() => {
+  if (isAdmin.value) {
+    return [
+      {
+        key: 'pending',
+        label: '待审批预约',
+        value: adminOverview.value.pendingReservations || 0,
+        description: '当前等待管理员处理的预约申请',
+        tone: 'primary'
+      },
+      {
+        key: 'labs',
+        label: '实验室总数',
+        value: adminOverview.value.labsTotal || 0,
+        description: `空闲 ${adminLabs.value.free || 0} / 忙碌 ${adminLabs.value.busy || 0}`,
+        tone: 'info'
+      },
+      {
+        key: 'repair',
+        label: '今日报修',
+        value: adminOverview.value.repairToday || 0,
+        description: `处理中 ${adminRepair.value.byStatus?.processing || 0} 单`,
+        tone: 'warning'
+      },
+      {
+        key: 'alarm',
+        label: '今日告警',
+        value: adminOverview.value.alarmsToday || 0,
+        description: '建议优先核查高风险实验室与设备',
+        tone: 'danger'
+      }
+    ]
+  }
   return [
-    { key: 'all', label: '消息总量', value: allItems.value.length, unread: unreadTotal.value, colorType: 'primary' },
-    build('announcement', '公告消息', 'info'),
-    build('reservation', '预约审批', 'info'),
-    build('asset_borrow', '借用提醒', 'warning'),
-    build('door_reminder', '门禁提醒', 'info'),
-    build('risk_alert', '异常预警', 'danger')
+    {
+      key: 'review',
+      label: '待审核预约',
+      value: overviewMetrics.value.teacherPendingReviewCount || 0,
+      description: '当前由你处理的预约审核事项',
+      tone: 'primary'
+    },
+    {
+      key: 'notice',
+      label: '未读消息',
+      value: overviewMetrics.value.studentUnreadCount || 0,
+      description: '统一消息流中的未读提醒',
+      tone: 'info'
+    },
+    {
+      key: 'repair',
+      label: '报修进行中',
+      value: overviewMetrics.value.studentRepairActiveCount || 0,
+      description: '你提交且尚未关闭的报修工单',
+      tone: 'warning'
+    },
+    {
+      key: 'reserve',
+      label: '我的预约',
+      value: overviewMetrics.value.studentReservationCount || 0,
+      description: '包含已完成与待审核预约',
+      tone: 'success'
+    }
   ]
 })
 
-function nowText() {
-  const date = new Date()
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
-function toTimeValue(value) {
-  const normalized = String(value || '').trim().replace(' ', 'T')
-  const numeric = Date.parse(normalized)
-  return Number.isFinite(numeric) ? numeric : 0
-}
-
-function compareDesc(a, b) {
-  return toTimeValue(b.createdAt) - toTimeValue(a.createdAt)
-}
-
-function loadReadState() {
-  try {
-    const raw = localStorage.getItem(storageKey.value)
-    readState.value = raw ? JSON.parse(raw) : {}
-  } catch (error) {
-    readState.value = {}
+const businessCards = computed(() => {
+  if (!isAdmin.value) {
+    return [
+      {
+        key: 'teacher-pending',
+        label: '教学审核',
+        value: overviewMetrics.value.teacherPendingReviewCount || 0,
+        detail: '重点关注即将开课的预约审核。',
+        tagType: Number(overviewMetrics.value.teacherPendingReviewCount || 0) > 0 ? 'warning' : 'success',
+        tagText: Number(overviewMetrics.value.teacherPendingReviewCount || 0) > 0 ? '待处理' : '平稳'
+      },
+      {
+        key: 'teacher-msg',
+        label: '消息提醒',
+        value: overviewMetrics.value.studentUnreadCount || 0,
+        detail: '统一查看审批、借用、报修等通知。',
+        tagType: Number(overviewMetrics.value.studentUnreadCount || 0) > 0 ? 'primary' : 'info',
+        tagText: Number(overviewMetrics.value.studentUnreadCount || 0) > 0 ? '有更新' : '最新'
+      }
+    ]
   }
-}
 
-function saveReadState() {
-  localStorage.setItem(storageKey.value, JSON.stringify(readState.value))
-}
+  const pendingReservations = Number(adminOverview.value.pendingReservations || 0)
+  const activeRepairs = Number(
+    (adminRepair.value.byStatus?.submitted || 0)
+    + (adminRepair.value.byStatus?.accepted || 0)
+    + (adminRepair.value.byStatus?.processing || 0)
+  )
+  const repairingEquipments = Number(adminEquipment.value.repairing || 0)
+  const pendingClaims = Number(adminLostFound.value.claimPending || 0)
 
-function isRead(item) {
-  return Boolean(readState.value[item.id])
-}
-
-function setRead(item, read) {
-  if (read) {
-    readState.value = {
-      ...readState.value,
-      [item.id]: { readAt: nowText() }
+  return [
+    {
+      key: 'reservation',
+      label: '预约审批',
+      value: pendingReservations,
+      detail: `今日新增 ${adminReservations.value.today || 0} 条预约，近 7 天共 ${adminReservations.value.recent7dTotal || 0} 条。`,
+      tagType: pendingReservations > 0 ? 'warning' : 'success',
+      tagText: pendingReservations > 0 ? '待处理' : '平稳'
+    },
+    {
+      key: 'repair',
+      label: '维修工单',
+      value: activeRepairs,
+      detail: `今日报修 ${adminOverview.value.repairToday || 0} 单，已完成 ${adminRepair.value.byStatus?.completed || 0} 单。`,
+      tagType: activeRepairs > 0 ? 'warning' : 'success',
+      tagText: activeRepairs > 0 ? '处理中' : '正常'
+    },
+    {
+      key: 'equipment',
+      label: '设备状态',
+      value: repairingEquipments,
+      detail: `在库 ${adminEquipment.value.total || 0} 台，报废 ${adminEquipment.value.scrapped || 0} 台。`,
+      tagType: repairingEquipments > 0 ? 'danger' : 'success',
+      tagText: repairingEquipments > 0 ? '需关注' : '稳定'
+    },
+    {
+      key: 'lost-found',
+      label: '失物招领',
+      value: pendingClaims,
+      detail: `开放中 ${adminLostFound.value.open || 0} 条，待认领审核 ${pendingClaims} 条。`,
+      tagType: pendingClaims > 0 ? 'primary' : 'info',
+      tagText: pendingClaims > 0 ? '待审核' : '常态'
     }
-  } else {
-    const nextState = { ...readState.value }
-    delete nextState[item.id]
-    readState.value = nextState
+  ]
+})
+
+const trendRows = computed(() => {
+  const rows = Array.isArray(adminReservations.value.trend7d) ? adminReservations.value.trend7d : []
+  const maxValue = Math.max(...rows.map((item) => Number(item.count || 0)), 1)
+  return rows.map((item) => ({
+    ...item,
+    value: Number(item.count || 0),
+    height: Math.max((Number(item.count || 0) / maxValue) * 100, Number(item.count || 0) > 0 ? 18 : 6)
+  }))
+})
+
+const quickActions = computed(() => {
+  const items = [
+    { label: '待办中心', desc: '集中处理审批与异常事项', path: '/todo-center', adminOnly: true },
+    { label: '通知中心', desc: '查看统一消息流与提醒', path: '/notification-center', adminOnly: true },
+    { label: '预约审批', desc: '进入预约列表快速审批', path: '/reservations' },
+    { label: '实验室管理', desc: '查看实验室状态与平面图', path: '/labs' }
+  ]
+
+  if (hasPermission(PERMISSION_DUTY_OPERATOR)) {
+    items.push({ label: '运营看板', desc: '查看运行态势与风险', path: '/operations-board' })
   }
-  saveReadState()
-}
-
-function isSelected(id) {
-  return selectedIds.value.includes(id)
-}
-
-function toggleSelect(id) {
-  if (isSelected(id)) {
-    selectedIds.value = selectedIds.value.filter((item) => item !== id)
-    return
+  if (hasPermission(PERMISSION_ASSET_MANAGER)) {
+    items.push({ label: '资产管理', desc: '检查设备状态与借用', path: '/equipments', adminOnly: true })
   }
-  selectedIds.value = [...selectedIds.value, id]
-}
-
-function toggleSelectAll() {
-  if (isAllShownSelected.value) {
-    const shownIds = new Set(filteredItems.value.map((item) => item.id))
-    selectedIds.value = selectedIds.value.filter((id) => !shownIds.has(id))
-    return
+  if (hasPermission(PERMISSION_SCHEDULE_MANAGER)) {
+    items.push({ label: '排课管理', desc: '处理课表和门禁提醒', path: '/schedule-manage', adminOnly: true })
   }
-  const merged = new Set([...selectedIds.value, ...filteredItems.value.map((item) => item.id)])
-  selectedIds.value = Array.from(merged)
-}
-
-function markBatch(read) {
-  selectedItems.value.forEach((item) => {
-    setRead(item, read)
-  })
-}
-
-function markShownAsRead() {
-  filteredItems.value.forEach((item) => {
-    setRead(item, true)
-  })
-}
-
-function toggleRead(item) {
-  setRead(item, !isRead(item))
-}
-
-// === 数据拼装逻辑保持原样 ===
-function toAnnouncementItem(row) {
-  return {
-    id: `announcement-${row.id}`,
-    type: 'announcement',
-    typeLabel: '公告',
-    tagType: 'primary',
-    title: row.title || `公告 #${row.id}`,
-    subtitle: `${row.publisherName || '-'} · ${row.publishAt || '-'}`,
-    message: row.status === 'scheduled' ? '定时公告待发布，可在消息流中直接处理。' : '公告已发布。',
-    statusLabel: row.status === 'scheduled' ? '待发布' : '已发布',
-    statusType: row.status === 'scheduled' ? 'warning' : 'success',
-    createdAt: row.publishAt || row.createdAt || '',
-    jumpUrl: '/announcements',
-    processable: row.status === 'scheduled',
-    processLabel: '立即发布',
-    raw: row
+  if (hasPermission(PERMISSION_AUDIT_VIEWER)) {
+    items.push({ label: '审计日志', desc: '追踪关键后台操作', path: '/audit-logs', adminOnly: true })
   }
+
+  return items.filter((item) => !(item.adminOnly && !isAdmin.value)).slice(0, 6)
+})
+
+function hasPermission(permission) {
+  return authStore.permissions.includes(permission)
 }
 
-function toReservationItem(row) {
-  return {
-    id: `reservation-${row.id}`,
-    type: 'reservation',
-    typeLabel: '预约审批',
-    tagType: 'warning',
-    title: `${row.labName || '实验室'} 预约待审批`,
-    subtitle: `${row.user || '-'} · ${row.date || '-'} ${row.time || ''}`.trim(),
-    message: row.reason || '该预约申请正在等待后台审核。',
-    statusLabel: row.status === 'pending' ? '待审核' : row.status || '-',
-    statusType: 'warning',
-    createdAt: row.createdAt || '',
-    jumpUrl: '/reservations',
-    processable: row.status === 'pending',
-    processLabel: '通过预约',
-    raw: row
-  }
+function goTo(path) {
+  if (!path) return
+  router.push(path)
 }
 
-function toBorrowItem(row) {
-  const overdue = Boolean(row.isOverdue) || row.status === 'overdue'
-  return {
-    id: `asset-borrow-${row.id}-${overdue ? 'overdue' : row.status}`,
-    type: 'asset_borrow',
-    typeLabel: '借用提醒',
-    tagType: overdue ? 'danger' : 'success',
-    title: overdue ? '借用逾期未归还' : '借用申请待处理',
-    subtitle: `${row.equipmentName || row.equipmentAssetCode || '-'} · ${row.applicantName || row.applicantUserName || '-'}`,
-    message: overdue
-      ? `应归还时间 ${row.expectedReturnAt || '-'}，建议尽快发送催还提醒。`
-      : `${row.purpose || '该申请正在等待借用审批。'}`,
-    statusLabel: overdue ? '已逾期' : row.status === 'pending' ? '待审批' : row.status || '-',
-    statusType: overdue ? 'danger' : 'warning',
-    createdAt: row.updatedAt || row.createdAt || '',
-    jumpUrl: '/borrow-approval',
-    processable: overdue || row.status === 'pending',
-    processLabel: overdue ? '发送催还' : '通过借用',
-    raw: row
-  }
-}
-
-function toDoorItem(row) {
-  return {
-    id: `door-reminder-${row.id}`,
-    type: 'door_reminder',
-    typeLabel: '门禁提醒',
-    tagType: 'info',
-    title: `${row.labName || '-'} 开门提醒`,
-    subtitle: `${row.courseName || '-'} · ${row.occurrenceDate || '-'} ${row.periodText || ''}`.trim(),
-    message: `${row.teacherName || '-'} / ${row.className || '-'}，当前门禁状态 ${row.doorStatus || 'pending'}。`,
-    statusLabel: row.doorStatus === 'pending' ? '待处理' : row.doorStatus || '-',
-    statusType: row.doorStatus === 'pending' ? 'warning' : 'success',
-    createdAt: row.remindAt || row.startAt || '',
-    jumpUrl: '/schedule-manage',
-    processable: row.doorStatus === 'pending',
-    processLabel: '确认开门',
-    raw: row
-  }
-}
-
-function toRiskItem(row, index) {
-  return {
-    id: `risk-alert-${index}-${row.title}`,
-    type: 'risk_alert',
-    typeLabel: '异常预警',
-    tagType: 'danger',
-    title: row.title || '设备风险预警',
-    subtitle: `风险分 ${row.score || 0} · 等级 ${row.level || '-'}`,
-    message: row.description || '请及时查看风险详情并安排处理。',
-    statusLabel: row.level === 'high' ? '高风险' : row.level === 'medium' ? '中风险' : '关注',
-    statusType: row.level === 'high' ? 'danger' : row.level === 'medium' ? 'warning' : 'info',
-    createdAt: lastUpdated.value || nowText(),
-    jumpUrl: resolveAdminJumpUrl(row.jumpUrl || '') || '/equipments',
-    processable: false,
-    processLabel: '',
-    raw: row
-  }
-}
-
-async function fetchAll() {
+async function fetchDashboard() {
   loading.value = true
   try {
-    const [
-      announcementResp,
-      reservationResp,
-      borrowPendingResp,
-      borrowOverdueResp,
-      doorResp,
-      riskResp
-    ] = await Promise.all([
-      getAdminAnnouncements({ status: 'scheduled', limit: 30 }),
-      getReservationList({ status: 'pending', page: 1, pageSize: 30 }),
-      getBorrowRequests({ status: 'pending', page: 1, pageSize: 30 }),
-      getBorrowRequests({ status: 'overdue', page: 1, pageSize: 30 }),
-      getDoorRemindersToday(),
-      getAdminAiRiskAlerts()
-    ])
+    const tasks = [getWorkbenchOverview()]
+    if (isAdmin.value) tasks.push(getAdminDashboard())
 
-    const announcementRows = Array.isArray(announcementResp.data?.data) ? announcementResp.data.data : []
-    const reservationRows = Array.isArray(reservationResp.data?.data) ? reservationResp.data.data : []
-    const borrowPendingRows = Array.isArray(borrowPendingResp.data?.data) ? borrowPendingResp.data.data : []
-    const borrowOverdueRows = Array.isArray(borrowOverdueResp.data?.data) ? borrowOverdueResp.data.data : []
-    const doorRows = Array.isArray(doorResp.data?.data?.list) ? doorResp.data.data.list : []
-    const riskRows = Array.isArray(riskResp.data?.data?.alerts) ? riskResp.data.data.alerts : []
-
-    allItems.value = [
-      ...announcementRows.map(toAnnouncementItem),
-      ...reservationRows.map(toReservationItem),
-      ...borrowPendingRows.map(toBorrowItem),
-      ...borrowOverdueRows.map(toBorrowItem),
-      ...doorRows.filter((item) => item.doorStatus === 'pending').map(toDoorItem),
-      ...riskRows.map((item, index) => toRiskItem(item, index))
-    ].sort(compareDesc)
-    
-    lastUpdated.value = nowText()
-    selectedIds.value = selectedIds.value.filter((id) => allItems.value.some((item) => item.id === id))
+    const [overviewResp, adminResp] = await Promise.all(tasks)
+    workbenchOverview.value = overviewResp.data?.data || {}
+    if (isAdmin.value) {
+      adminDashboard.value = adminResp?.data?.data || {}
+    } else {
+      adminDashboard.value = {}
+    }
   } catch (error) {
-    console.error('Fetch error:', error)
+    ElMessage.error(error?.response?.data?.message || '加载仪表盘失败，请稍后重试')
   } finally {
     loading.value = false
   }
 }
 
-async function executeProcess(item) {
-  if (item.type === 'announcement') {
-    const raw = item.raw || {}
-    await updateAnnouncement(raw.id, {
-      title: raw.title || '',
-      content: raw.content || '',
-      publishAt: nowText(),
-      isPinned: Boolean(raw.isPinned)
-    })
-    return '公告已立即发布'
-  }
-  if (item.type === 'reservation') {
-    await approveReservation(item.raw.id)
-    return '预约已通过'
-  }
-  if (item.type === 'asset_borrow') {
-    if (item.statusLabel === '已逾期') {
-      await remindBorrowRequest(item.raw.id, {
-        message: `请尽快归还 ${item.raw.equipmentName || item.raw.equipmentAssetCode || '借用设备'}。`
-      })
-      return '已发送催还提醒'
-    }
-    await approveBorrowRequest(item.raw.id)
-    return '借用申请已通过'
-  }
-  if (item.type === 'door_reminder') {
-    await confirmDoorReminderOpen(item.raw.id, {
-      note: '通知中心批量确认开门'
-    })
-    return '门禁提醒已确认'
-  }
-  return ''
-}
-
-async function processItem(item) {
-  if (!item.processable) return
-  processingIds[item.id] = true
-  try {
-    const message = await executeProcess(item)
-    setRead(item, true)
-    if (message) ElMessage.success(message)
-    await fetchAll()
-  } catch(e) {
-    ElMessage.error('处理失败')
-  } finally {
-    processingIds[item.id] = false
-  }
-}
-
-async function processSelected() {
-  const rows = selectedItems.value.filter((item) => item.processable)
-  if (!rows.length) {
-    ElMessage.warning('当前所选消息没有可执行的批量动作')
-    return
-  }
-  batchProcessing.value = true
-  try {
-    for (const item of rows) {
-      await executeProcess(item)
-      setRead(item, true)
-    }
-    ElMessage.success(`已处理 ${rows.length} 条消息`)
-    await fetchAll()
-  } finally {
-    batchProcessing.value = false
-  }
-}
-
-function goItem(item) {
-  if (!isRead(item)) {
-    setRead(item, true)
-  }
-  const target = resolveAdminJumpUrl(item.jumpUrl || '') || item.jumpUrl || '/dashboard'
-  router.push(target)
-}
-
 onMounted(() => {
-  loadReadState()
-  fetchAll()
+  fetchDashboard()
 })
 </script>
 
 <style scoped lang="scss">
-// 设计系统变量
-$bg-color: #f8fafc;
-$card-bg: #ffffff;
-$text-main: #0f172a;
-$text-regular: #475569;
-$text-light: #94a3b8;
-$border-color: #e2e8f0;
-$primary: #3b82f6;
-$danger: #ef4444;
-$warning: #f59e0b;
-$success: #10b981;
-$info: #64748b;
-$radius-lg: 16px;
-$radius-md: 8px;
-$shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.03);
-$shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
-
-.page-container {
-  padding: 32px;
-  background-color: $bg-color;
-  min-height: 100vh;
-  box-sizing: border-box;
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-/* --- 顶部概览区 --- */
-.overview-section {
-  margin-bottom: 24px;
+.hero-card,
+.panel-card,
+.metric-card {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
 }
 
-.header-row {
+.hero-card {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end; // 修改为底部对齐更好看
-  margin-bottom: 24px;
+  gap: 20px;
+  padding: 28px 32px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 38%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
 
-  .eyebrow {
-    display: inline-block;
-    color: $primary;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    margin-bottom: 8px;
-  }
-
-  .page-title {
-    font-size: 28px;
-    font-weight: 700;
-    color: $text-main;
-    margin: 0 0 12px 0;
-  }
-
-  .page-desc {
-    color: $text-regular;
-    font-size: 14px;
-    margin: 0;
-    line-height: 1.5;
-
-    .update-time {
-      color: $text-light;
-      margin-left: 16px;
-      font-size: 13px;
-      padding-left: 16px;
-      border-left: 1px solid $border-color;
-    }
+  h1 {
+    margin: 6px 0 10px;
+    font-size: 32px;
+    color: #17202a;
   }
 }
 
-/* --- 指标卡片 (悬浮美学) --- */
-.stats-grid {
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hero-desc {
+  margin: 0;
+  max-width: 720px;
+  color: #5b6574;
+  line-height: 1.6;
+}
+
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
-.stat-card {
-  background: $card-bg;
-  border-radius: $radius-lg;
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 20px;
-  box-shadow: $shadow-soft;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  position: relative;
-  overflow: hidden;
-
-  // 左侧彩色指示条
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    opacity: 0;
-    transition: opacity 0.3s;
-  }
-
-  &.has-unread::before { opacity: 1; }
-  &.is-primary::before { background-color: $primary; }
-  &.is-danger::before { background-color: $danger; }
-  &.is-warning::before { background-color: $warning; }
-  &.is-info::before { background-color: $info; }
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: $shadow-hover;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
   }
 
-  .stat-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-
-    .stat-label {
-      font-size: 14px;
-      color: $text-regular;
-      font-weight: 500;
-    }
-
-    .unread-badge {
-      font-size: 12px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      background: #f1f5f9;
-      color: $text-regular;
-    }
+  &.primary {
+    background: linear-gradient(180deg, #eff6ff 0%, #fff 100%);
   }
 
-  .stat-value {
-    font-size: 32px;
-    font-weight: 700;
-    color: $text-main;
-    line-height: 1;
-    font-family: 'Inter', sans-serif;
+  &.info {
+    background: linear-gradient(180deg, #f0fdfa 0%, #fff 100%);
   }
 
-  // 特定颜色的未读 Badge 样式
-  &.is-danger .unread-badge { background: #fef2f2; color: $danger; }
-  &.is-warning .unread-badge { background: #fffbeb; color: $warning; }
-  &.is-primary .unread-badge { background: #eff6ff; color: $primary; }
+  &.warning {
+    background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
+  }
+
+  &.danger {
+    background: linear-gradient(180deg, #fef2f2 0%, #fff 100%);
+  }
+
+  &.success {
+    background: linear-gradient(180deg, #ecfdf5 0%, #fff 100%);
+  }
 }
 
-/* --- 控制栏 --- */
-.control-bar {
+.metric-label {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.metric-value {
+  font-size: 32px;
+  line-height: 1;
+  color: #17202a;
+}
+
+.metric-sub {
+  color: #7b8694;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.panel-card {
+  padding: 20px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+  }
+}
+
+.panel-span-2 {
+  grid-column: span 2;
+}
+
+.panel-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  background: $card-bg;
-  padding: 16px 24px;
-  border-radius: $radius-lg;
-  box-shadow: $shadow-soft;
+  gap: 12px;
+  align-items: flex-start;
   margin-bottom: 16px;
 
-  .filter-group {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
+  h3 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    color: #17202a;
+  }
+
+  span {
+    color: #7b8694;
+    font-size: 13px;
   }
 }
 
-// 药丸风格定制 Radio
-:deep(.custom-radio) {
-  .el-radio-button__inner {
-    border: none !important;
-    background: transparent;
-    color: $text-regular;
-    font-weight: 500;
-    border-radius: 6px !important;
-    padding: 8px 16px;
-    box-shadow: none !important;
-  }
-  
-  .el-radio-button__original-radio:checked + .el-radio-button__inner {
-    background-color: #eff6ff;
-    color: $primary;
-    box-shadow: none !important;
-  }
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
 
-  &.light-radio .el-radio-button__original-radio:checked + .el-radio-button__inner {
-    background-color: #f1f5f9;
-    color: $text-main;
+.overview-item {
+  padding: 16px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+
+  p {
+    margin: 8px 0 0;
+    color: #6b7280;
+    font-size: 13px;
+    line-height: 1.6;
   }
 }
 
-:deep(.custom-search) {
-  width: 320px;
-  .el-input__wrapper {
-    box-shadow: 0 0 0 1px $border-color inset;
-    border-radius: 8px;
-    padding: 4px 12px;
-    &:hover, &.is-focus { box-shadow: 0 0 0 1px $primary inset; }
-  }
-}
-
-/* --- 批量操作栏 --- */
-.batch-bar {
+.overview-top {
   display: flex;
   justify-content: space-between;
+  gap: 12px;
   align-items: center;
-  padding: 0 8px 16px 8px;
-  flex-wrap: wrap;
-
-  .select-info {
-    font-size: 14px;
-    color: $text-regular;
-    strong { color: $primary; font-size: 16px; }
-  }
-
-  .batch-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
 }
 
-/* --- 消息列表 --- */
-.message-list {
+.overview-value {
+  margin-top: 12px;
+  font-size: 28px;
+  font-weight: 700;
+  color: #17202a;
+}
+
+.quick-list,
+.timeline-list,
+.rank-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.empty-state {
-  background: $card-bg;
-  border-radius: $radius-lg;
-  padding: 60px 0;
-  box-shadow: $shadow-soft;
+.quick-item,
+.timeline-item,
+.rank-item {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 14px 16px;
 }
 
-.message-card {
-  background: $card-bg;
-  border-radius: $radius-lg;
-  padding: 20px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  box-shadow: $shadow-soft;
+.quick-item {
+  text-align: left;
+  cursor: pointer;
   transition: all 0.2s ease;
-  border: 1px solid transparent;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  strong {
+    color: #17202a;
+    margin-bottom: 6px;
+  }
+
+  span {
+    color: #6b7280;
+    font-size: 13px;
+  }
 
   &:hover {
-    border-color: rgba(59, 130, 246, 0.1);
-    box-shadow: $shadow-hover;
-    .hover-btn { opacity: 1; visibility: visible; }
+    border-color: rgba(15, 118, 110, 0.28);
+    transform: translateY(-1px);
+  }
+}
+
+.timeline-item {
+  strong,
+  span {
+    display: block;
   }
 
-  // 选中状态
-  &.is-selected {
-    border-color: rgba(59, 130, 246, 0.3);
-    background-color: #f8fafc;
+  strong {
+    color: #17202a;
+    margin-bottom: 6px;
   }
 
-  // 已读状态
-  &.is-read {
-    opacity: 0.65;
-    .msg-title { color: $text-regular; font-weight: 500; }
-  }
-
-  .card-left {
-    display: flex;
-    gap: 16px;
-    flex: 1;
-  }
-
-  .msg-checkbox {
-    margin-top: 2px;
-  }
-
-  .msg-content {
-    flex: 1;
-  }
-
-  .msg-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-
-    .msg-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: $text-main;
-      margin: 0;
-    }
-
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background-color: $danger;
-    }
-
-    .severity-badge {
-      font-size: 12px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid currentColor;
-      
-      &.badge-danger { color: $danger; background: #fef2f2; border-color: rgba(239, 68, 68, 0.2); }
-      &.badge-warning { color: $warning; background: #fffbeb; border-color: rgba(245, 158, 11, 0.2); }
-      &.badge-success { color: $success; background: #ecfdf5; border-color: rgba(16, 185, 129, 0.2); }
-      &.badge-info, &.badge-primary { color: $info; background: #f1f5f9; border-color: rgba(100, 116, 139, 0.2); }
-    }
-  }
-
-  .msg-desc {
-    color: $text-regular;
+  span {
+    color: #6b7280;
     font-size: 13px;
-    margin: 0 0 8px 0;
-  }
-  
-  .msg-detail {
-    color: $text-main;
-    font-size: 14px;
-    margin: 0;
-    line-height: 1.5;
-  }
-
-  .card-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 12px;
-    min-width: 200px;
-
-    .msg-time {
-      font-size: 13px;
-      color: $text-light;
-    }
-
-    .msg-actions {
-      display: flex;
-      gap: 12px;
-
-      // 默认隐藏部分按钮，hover时显示
-      .hover-btn {
-        opacity: 0;
-        visibility: hidden;
-        transition: all 0.2s;
-      }
-    }
   }
 }
 
-:deep(.custom-tag) {
-  border-radius: 6px;
-  font-weight: 500;
-  border: none;
-  &.el-tag--danger { background-color: #fef2f2; color: $danger; }
-  &.el-tag--warning { background-color: #fffbeb; color: $warning; }
+.rank-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
-// 响应式设计
-@media (max-width: 960px) {
-  .header-row { flex-direction: column; align-items: flex-start; gap: 16px; }
-  .message-card {
+.rank-index {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.rank-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  strong {
+    color: #17202a;
+  }
+
+  span {
+    color: #6b7280;
+    font-size: 13px;
+  }
+}
+
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  min-height: 240px;
+}
+
+.trend-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-label,
+.trend-value {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.trend-bar-wrap {
+  width: 100%;
+  min-height: 160px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.trend-bar {
+  width: 100%;
+  border-radius: 14px 14px 6px 6px;
+  background: linear-gradient(180deg, #0f766e 0%, #34d399 100%);
+}
+
+@media (max-width: 1200px) {
+  .metric-grid,
+  .panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel-span-2 {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-card {
     flex-direction: column;
-    .card-right {
-      width: 100%;
-      align-items: flex-start;
-      margin-top: 16px;
-      padding-left: 30px; // 与左侧复选框对齐
-      flex-direction: row;
-      justify-content: space-between;
-      
-      .hover-btn { opacity: 1; visibility: visible; }
-    }
+    padding: 24px;
+  }
+
+  .hero-actions {
+    flex-wrap: wrap;
+  }
+
+  .metric-grid,
+  .panel-grid,
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-span-2 {
+    grid-column: span 1;
+  }
+
+  .trend-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 </style>

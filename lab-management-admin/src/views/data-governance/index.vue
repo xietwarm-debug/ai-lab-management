@@ -2,9 +2,9 @@
   <div class="governance-page">
     <section class="hero-card">
       <div class="hero-copy">
-        <span class="eyebrow">Data Quality</span>
+        <span class="eyebrow">数据治理</span>
         <h2>批量导入与数据治理</h2>
-        <p>集中做实验室、资产、课表的批量导入前校验，并提供重复检测、异常记录修复建议和错误回显。</p>
+        <p>在导入实验室、资产和课表前集中做校验、去重和异常修复建议，提升后台数据的一致性与可用性。</p>
       </div>
       <div class="hero-actions">
         <el-button :loading="refreshing" @click="loadBaseData">刷新基线数据</el-button>

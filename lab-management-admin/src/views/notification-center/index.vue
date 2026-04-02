@@ -578,6 +578,26 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
 .overview-section {
   margin-bottom: 24px;
   animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border-radius: $radius-lg;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 38%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
+  box-shadow: $shadow-soft;
+
+  &::after {
+    content: '';
+    position: absolute;
+    right: -32px;
+    bottom: -80px;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0));
+    pointer-events: none;
+  }
 }
 
 .header-row {
@@ -585,12 +605,18 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
   justify-content: space-between;
   align-items: flex-end; // 修改为底部对齐更好看
   margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
 
   .eyebrow {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(15, 118, 110, 0.1);
     color: $primary;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 700;
     letter-spacing: 0.08em;
     margin-bottom: 8px;
   }
@@ -713,6 +739,7 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
   box-shadow: $shadow-soft;
   margin-bottom: 16px;
   animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both;
+  border: 1px solid rgba(15, 23, 42, 0.08);
 
   .filter-group {
     display: flex;
@@ -764,6 +791,11 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
   padding: 0 8px 16px 8px;
   flex-wrap: wrap;
   animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.15s both;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: $radius-md;
+  margin-bottom: 16px;
+  padding: 12px 16px;
 
   .select-info {
     font-size: 14px;

@@ -197,6 +197,39 @@ export async function listAnnouncements(params = {}) {
   });
 }
 
+export async function listAssetPortalEquipments(params = {}) {
+  const query = toQuery(params || {});
+  return apiRequest({
+    url: `/asset-portal/equipments${query ? `?${query}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function adminGetUserPermissions(userId) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/permissions`,
+    method: "GET"
+  });
+}
+
+export async function adminGrantUserPermission(userId, payload = {}) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/permissions/grant`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminRevokeUserPermission(userId, payload = {}) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/permissions/revoke`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
 export async function teacherCreateCourseTask(courseId, payload = {}) {
   return apiRequest({
     url: `/teacher/courses/${encodeURIComponent(String(courseId || ""))}/tasks`,
@@ -703,6 +736,100 @@ export async function adminGetLabScheduleWeek(labId, dateText = "") {
   return apiRequest({
     url: `/admin/labs/${encodeURIComponent(String(labId || ""))}/schedule/week${q ? `?${q}` : ""}`,
     method: "GET"
+  });
+}
+
+export async function adminGetDutyRoster(params = {}) {
+  const q = toQuery(params || {});
+  return apiRequest({
+    url: `/admin/duty-roster${q ? `?${q}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function adminSaveDutyRoster(payload = {}) {
+  return apiRequest({
+    url: "/admin/duty-roster",
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminUpdateDutyRosterStatus(rosterId, payload = {}) {
+  return apiRequest({
+    url: `/admin/duty-roster/${encodeURIComponent(String(rosterId || ""))}/status`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminGetEmergencyContacts(params = {}) {
+  const q = toQuery(params || {});
+  return apiRequest({
+    url: `/admin/emergency-contacts${q ? `?${q}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function adminSaveEmergencyContact(payload = {}) {
+  return apiRequest({
+    url: "/admin/emergency-contacts",
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminDeleteEmergencyContact(contactId) {
+  return apiRequest({
+    url: `/admin/emergency-contacts/${encodeURIComponent(String(contactId || ""))}/delete`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: {}
+  });
+}
+
+export async function getDutyRoster(params = {}) {
+  const q = toQuery(params || {});
+  return apiRequest({
+    url: `/duty-roster${q ? `?${q}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function getEmergencyContacts(params = {}) {
+  const q = toQuery(params || {});
+  return apiRequest({
+    url: `/emergency-contacts${q ? `?${q}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function adminGetIncidents(params = {}) {
+  const q = toQuery(params || {});
+  return apiRequest({
+    url: `/admin/incidents${q ? `?${q}` : ""}`,
+    method: "GET"
+  });
+}
+
+export async function adminSaveIncident(payload = {}) {
+  return apiRequest({
+    url: "/admin/incidents",
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminUpdateIncidentStatus(incidentId, payload = {}) {
+  return apiRequest({
+    url: `/admin/incidents/${encodeURIComponent(String(incidentId || ""))}/status`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
   });
 }
 

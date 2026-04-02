@@ -370,6 +370,13 @@ export default {
           badge: 0
         },
         {
+          key: "dutyEmergency",
+          icon: "应",
+          name: "值班应急",
+          desc: "值班、事故与联系人",
+          badge: 0
+        },
+        {
           key: "audit",
           icon: "记",
           name: "审计日志",
@@ -459,6 +466,13 @@ export default {
           badgeType: "unread"
         },
         {
+          key: "dutyRoster",
+          icon: "值",
+          name: "值班表",
+          desc: "查看本周值班与应急联系人",
+          badge: 0
+        },
+        {
           key: "lostfoundUser",
           icon: "物",
           name: "失物招领",
@@ -490,6 +504,13 @@ export default {
     },
     teacherQuickEntries() {
       return [
+        {
+          key: "teacherAssets",
+          icon: "资",
+          name: "资产查询",
+          desc: "只读查看资产台账",
+          badge: 0
+        },
         {
           key: "courses",
           icon: "\u8bfe",
@@ -555,6 +576,13 @@ export default {
           badgeType: "unread"
         },
         {
+          key: "dutyRoster",
+          icon: "值",
+          name: "值班表",
+          desc: "查看值班安排与应急联系人",
+          badge: 0
+        },
+        {
           key: "lostfoundUser",
           icon: "物",
           name: "失物招领",
@@ -600,7 +628,7 @@ export default {
         buildGroup("approval", "审批类", "预约、借用、工单、认领处理", ["todoCenter", "approve", "borrowApproval", "reservationBoard", "repairOrders", "lostfound"]),
         buildGroup("assets", "资产类", "实验室、布局与设备", ["labs", "roomMap", "equipments"]),
         buildGroup("content", "内容类", "公告、通知与课表运营", ["announcementEditor", "announcementList", "notifications", "scheduleManage"]),
-        buildGroup("system", "系统类", "账号、审计和规则配置", ["users", "audit", "stats", "reportCenter", "reservationRules"])
+        buildGroup("system", "系统类", "账号、审计、规则和值班应急", ["users", "audit", "stats", "reportCenter", "reservationRules", "dutyEmergency"])
       ]
     },
     studentEntryGroups() {
@@ -617,7 +645,7 @@ export default {
 
       return [
         buildGroup("studentReserve", "预约学习", "实验室查询与预约申请", ["courses", "labs", "reserve", "myReservations"]),
-        buildGroup("studentService", "消息服务", "通知、借用、报修和失物处理", ["notifications", "myBorrowings", "myRepairOrders", "lostfoundUser"]),
+        buildGroup("studentService", "消息服务", "通知、借用、报修和值班联系", ["notifications", "dutyRoster", "myBorrowings", "myRepairOrders", "lostfoundUser"]),
         buildGroup("studentAccount", "个人中心", "助手、资料与账号设置", ["agent", "profile", "settings"])
       ]
     },
@@ -634,13 +662,13 @@ export default {
       }
 
       return [
-        buildGroup("teacherReserve", "\u6559\u5b66\u9884\u7ea6", "\u5b9e\u9a8c\u5ba4\u9884\u7ea6\u4e0e\u8fdb\u5ea6\u67e5\u770b", ["labs", "reserve", "myReservations"]),
+        buildGroup("teacherReserve", "\u6559\u5b66\u9884\u7ea6", "\u5b9e\u9a8c\u5ba4\u9884\u7ea6\u4e0e\u8fdb\u5ea6\u67e5\u770b", ["teacherAssets", "labs", "reserve", "myReservations"]),
         buildGroup("teacherService", "\u8bfe\u5802\u670d\u52a1", "\u5b9e\u9a8c\u8bfe\u7a0b\u4e0e\u4efb\u52a1", ["courses", "homeworkReview"]),
         buildGroup(
           "teacherWorkbench",
           "\u6559\u5e08\u5de5\u4f5c\u53f0",
-          "\u5f85\u6279\u6539\u3001\u6d88\u606f\u3001\u501f\u7528\u3001\u5de5\u5355\u4e0e\u8d26\u53f7\u7ba1\u7406",
-          ["homeworkPending", "notifications", "myBorrowings", "myRepairOrders", "lostfoundUser", "agent", "profile", "settings"]
+          "\u5f85\u6279\u6539\u3001\u6d88\u606f\u3001\u503c\u73ed\u8054\u7cfb\u3001\u501f\u7528\u3001\u5de5\u5355\u4e0e\u8d26\u53f7\u7ba1\u7406",
+          ["homeworkPending", "notifications", "dutyRoster", "myBorrowings", "myRepairOrders", "lostfoundUser", "agent", "profile", "settings"]
         )
       ]
     }
@@ -789,6 +817,7 @@ export default {
       if (key === "users") return this.goUsers()
       if (key === "notifications") return this.goNotifications()
       if (key === "scheduleManage") return this.goScheduleManage()
+      if (key === "dutyEmergency") return this.goDutyEmergency()
       if (key === "audit") return this.goAudit()
       if (key === "stats") return this.goStats()
       if (key === "reportCenter") return this.goReportCenter()
@@ -804,12 +833,14 @@ export default {
       if (key === "approve") return this.goApprove()
       if (key === "myRepairOrders") return this.goMyRepairOrders()
       if (key === "notifications") return this.goNotifications()
+      if (key === "dutyRoster") return this.goDutyRoster()
       if (key === "lostfoundUser") return this.goLostFoundUser()
       if (key === "agent") return this.goAgent()
       if (key === "profile") return this.goProfile()
       if (key === "settings") return this.goSettings()
     },
     openTeacherEntry(key) {
+      if (key === "teacherAssets") return this.goTeacherAssets()
       if (key === "courses") return this.goTeacherCourses()
       if (key === "homeworkReview") return this.goHomeworkReview()
       if (key === "homeworkPending") return this.goHomeworkPending()
@@ -819,6 +850,7 @@ export default {
       if (key === "myBorrowings") return this.goMyBorrowings()
       if (key === "myRepairOrders") return this.goMyRepairOrders()
       if (key === "notifications") return this.goNotifications()
+      if (key === "dutyRoster") return this.goDutyRoster()
       if (key === "lostfoundUser") return this.goLostFoundUser()
       if (key === "agent") return this.goAgent()
       if (key === "profile") return this.goProfile()
@@ -873,6 +905,9 @@ export default {
     goTeacherCourses() {
       uni.navigateTo({ url: "/pages/teacher/courses" })
     },
+    goTeacherAssets() {
+      uni.navigateTo({ url: "/pages/teacher/assets" })
+    },
     goHomeworkReview() {
       uni.navigateTo({ url: "/pages/teacher/homework_review" })
     },
@@ -911,6 +946,12 @@ export default {
     },
     goScheduleManage() {
       uni.navigateTo({ url: "/pages/admin/schedule_manage" })
+    },
+    goDutyEmergency() {
+      uni.navigateTo({ url: "/pages/admin/duty_emergency" })
+    },
+    goDutyRoster() {
+      uni.navigateTo({ url: "/pages/duty/roster" })
     },
     goLostFound() {
       uni.navigateTo({ url: "/pages/admin/lostfound" })

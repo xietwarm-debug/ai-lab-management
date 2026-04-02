@@ -2,8 +2,9 @@
   <div class="page-wrap">
     <section class="page-head">
       <div>
+        <span class="eyebrow">数据洞察</span>
         <h2>报表中心</h2>
-        <p>复用 `/admin/reports/center` 与导出接口，展示预约、实验室利用率、设备故障、用户活跃度与公告触达情况。</p>
+        <p>集中查看预约趋势、实验室利用率、设备故障、用户活跃度和公告触达情况，并支持按时间区间导出分析结果。</p>
       </div>
       <div class="head-actions">
         <el-button :loading="loading" @click="resetFilters">重置区间</el-button>
@@ -469,7 +470,7 @@ onMounted(() => {
 .page-head,
 .page-card,
 .panel-card {
-  border: 1px solid var(--app-border);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 24px;
   background: var(--app-surface);
   box-shadow: var(--app-shadow);
@@ -484,16 +485,33 @@ onMounted(() => {
 }
 
 .page-head {
+  position: relative;
+  overflow: hidden;
   padding: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 36%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
 }
 
-.page-card {
+.page-head::after {
+  content: '';
+  position: absolute;
+  right: -36px;
+  bottom: -84px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0));
+}
+
+.page-card,
+.panel-card {
   padding: 24px;
 }
 
 .page-head h2,
 .panel-head h3 {
-  margin: 0 0 8px;
+  margin: 8px 0 10px;
 }
 
 .page-head p,
@@ -505,9 +523,24 @@ onMounted(() => {
 .stack-text span,
 .rank-content span {
   color: var(--app-muted);
+  line-height: 1.7;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .head-actions {
+  position: relative;
+  z-index: 1;
   flex-wrap: wrap;
 }
 

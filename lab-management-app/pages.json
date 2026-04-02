@@ -89,6 +89,13 @@
       }
     },
     {
+      "path": "pages/teacher/assets",
+      "style": {
+        "navigationBarTitleText": "资产查询",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/teacher/homework_review",
       "style": {
         "navigationBarTitleText": "作业批改"
@@ -221,6 +228,13 @@
         "navigationBarTitleText": "",
         "enablePullDownRefresh": true,
         "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/duty/roster",
+      "style": {
+        "navigationBarTitleText": "值班表",
+        "enablePullDownRefresh": true
       }
     },
     {
@@ -363,6 +377,12 @@
       "path": "pages/admin/schedule_manage",
       "style": {
         "navigationBarTitleText": "课表管理"
+      }
+    },
+    {
+      "path": "pages/admin/duty_emergency",
+      "style": {
+        "navigationBarTitleText": "值班应急"
       }
     },
     {

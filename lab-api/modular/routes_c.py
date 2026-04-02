@@ -2295,7 +2295,7 @@ def list_reservation_waitlist():
                 "updatedAt": _to_text_time(row.get("updatedAt")),
             }
         )
-    return jsonify({"ok": True, "data": data, "meta": {"count": len(data), "limit": limit}})
+    return jsonify({"ok": True, "data": data, "meta": {"count": len(data), "limit": 200}})
 
 
 @app.post("/reservations/waitlist/<int:waitlist_id>/cancel")

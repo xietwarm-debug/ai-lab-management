@@ -2,8 +2,9 @@
   <div class="reservation-page">
     <section class="page-toolbar">
       <div class="toolbar-copy">
+        <span class="eyebrow">预约审核</span>
         <h2>预约审批管理</h2>
-        <p>复用 `/reservations`、审批接口和 AI 建议接口，支持管理员与教师角色。</p>
+        <p>集中处理预约审核、查看 AI 审批建议和预约明细，适配管理员与教师两类审核角色的日常工作流。</p>
       </div>
       <div class="toolbar-actions">
         <el-button @click="resetFilters">重置筛选</el-button>
@@ -389,10 +390,33 @@ onMounted(() => {
 .filter-card,
 .table-card {
   padding: 24px;
-  border: 1px solid var(--app-border);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 24px;
-  background: var(--app-surface);
   box-shadow: var(--app-shadow);
+}
+
+.page-toolbar {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 36%),
+    linear-gradient(135deg, #ffffff, #f5fbfa);
+}
+
+.page-toolbar::after {
+  content: '';
+  position: absolute;
+  right: -36px;
+  bottom: -84px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.18), rgba(45, 212, 191, 0));
+}
+
+.filter-card,
+.table-card {
+  background: var(--app-surface);
 }
 
 .page-toolbar,
@@ -405,8 +429,15 @@ onMounted(() => {
   gap: 16px;
 }
 
+.toolbar-actions {
+  position: relative;
+  z-index: 1;
+  flex-wrap: wrap;
+}
+
 .toolbar-copy h2 {
-  margin: 0 0 8px;
+  margin: 8px 0 10px;
+  font-size: 30px;
 }
 
 .toolbar-copy p,
@@ -414,6 +445,19 @@ onMounted(() => {
 .cell-sub {
   margin: 0;
   color: var(--app-muted);
+  line-height: 1.7;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .action-row {

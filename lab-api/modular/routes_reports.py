@@ -298,6 +298,14 @@ def _build_report_payload(start_date, end_date):
             read_map = {_to_int(x.get("announcementId")): {"readUsers": _to_int(x.get("readUsers")), "readRecords": _to_int(x.get("readRecords"))} for x in read_rows}
             unique_readers = _to_int(_query_one(f"SELECT COUNT(DISTINCT user_name) AS cnt FROM announcement_read_state WHERE announcement_id IN ({placeholders})", tuple(params)).get("cnt"))
 
+
+    warehouse_rows = _safe_stats_query(
+        "SELECT w.id, w.name, (SELECT COUNT(*) FROM equipment e WHERE e.warehouse_id=w.id AND e.status != 'scrapped') as assetCount FROM warehouse w"
+    )
+    warehouse_assets = [{"warehouseId": _to_int(x.get("id")), "warehouseName": str(x.get("name") or ""), "assetCount": _to_int(x.get("assetCount"))} for x in warehouse_rows]
+    warehouse_assets.sort(key=lambda x: x["assetCount"], reverse=True)
+    transfer_count_total = _to_int(_query_one("SELECT COUNT(*) AS cnt FROM asset_transfer_record WHERE transfer_date >= %s AND transfer_date < %s", (start_ts, end_ts)).get("cnt"))
+
     return {
         "generatedAt": now_text,
         "range": {"startDate": start_text, "endDate": end_text, "days": int(days)},
@@ -391,6 +399,13 @@ def _build_report_payload(start_date, end_date):
                 for x in published_rows[:30]
             ],
         },
+        "warehouseManagement": {
+            "summary": {
+                "activeWarehouses": len(warehouse_rows),
+                "transferCount": transfer_count_total,
+            },
+            "distribution": warehouse_assets[:20],
+        },
     }
 
 
@@ -470,6 +485,17 @@ def _build_export_rows(payload):
     rows.append(["", "用户总数", _to_int(user_summary.get("totalUsers"))])
     rows.append(["", "活跃用户数", _to_int(user_summary.get("activeUsers"))])
     rows.append(["", "活跃率", _percent(user_summary.get("activityRate"))])
+    rows.append([])
+
+    warehouse = data.get("warehouseManagement") if isinstance(data.get("warehouseManagement"), dict) else {}
+    warehouse_summary = warehouse.get("summary") if isinstance(warehouse.get("summary"), dict) else {}
+    rows.append(["仓库管理报表", "指标", "值"])
+    rows.append(["", "活跃仓库数", _to_int(warehouse_summary.get("activeWarehouses"))])
+    rows.append(["", "资产调拨次数", _to_int(warehouse_summary.get("transferCount"))])
+    rows.append([])
+    rows.append(["仓库管理报表-资产分布", "仓库名称", "资产数量"])
+    for item in warehouse.get("distribution") or []:
+        rows.append(["", str((item or {}).get("warehouseName") or ""), _to_int((item or {}).get("assetCount"))])
     rows.append([])
 
     announcement = data.get("announcementReach") if isinstance(data.get("announcementReach"), dict) else {}
@@ -803,6 +829,7 @@ def _build_admin_overview(current_user):
             ),
             "adminUnreadCount": sum(int(v or 0) for v in unread_map.values()),
             "userCount": _overview_count("SELECT COUNT(*) AS cnt FROM user"),
+            "warehouseCount": _overview_count("SELECT COUNT(*) AS cnt FROM warehouse WHERE status='active'"),
         },
         "meta": {
             "unreadByType": unread_map,

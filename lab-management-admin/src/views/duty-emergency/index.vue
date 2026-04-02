@@ -4,9 +4,9 @@
     <section class="hero-card overview-section is-danger-theme">
       <div class="hero-content">
         <div class="hero-copy">
-          <span class="eyebrow">On Call</span>
+          <span class="eyebrow">值班与应急</span>
           <h1 class="page-title">值班与应急处置</h1>
-          <p class="page-desc">统一管理值班表、实验室事故上报、应急联系人和处置闭环，适配实验室日常值守场景。</p>
+          <p class="page-desc">统一管理值班排班、事故上报、应急联系人和处置闭环，支持实验室日常值守与突发响应。</p>
         </div>
         <div class="hero-actions">
           <el-button type="danger" plain :loading="loading" @click="loadAll" :icon="RefreshRight" class="hover-lift">
@@ -25,14 +25,84 @@
           <template #label>
             <span class="tab-label-custom"><el-icon><Calendar /></el-icon> 值班表</span>
           </template>
-          
-          <div class="tab-grid mt-4">
-            <!-- 左侧：表单 -->
-            <article class="sub-card panel-fade-in">
+
+          <div class="duty-layout mt-4">
+            <article class="sub-card calendar-card panel-fade-in">
+              <div class="sub-head duty-calendar-head">
+                <div class="head-left">
+                  <h3>周值班日历</h3>
+                  <span>一次查看一周，按早 / 中 / 晚三个时段安排值班。</span>
+                </div>
+                <div class="calendar-toolbar">
+                  <el-button-group>
+                    <el-button @click="changeWeek(-1)">上一周</el-button>
+                    <el-button @click="goCurrentWeek">本周</el-button>
+                    <el-button @click="changeWeek(1)">下一周</el-button>
+                  </el-button-group>
+                  <span class="calendar-range">{{ weekRangeLabel }}</span>
+                </div>
+              </div>
+
+              <div class="duty-calendar">
+                <div class="calendar-corner">时段</div>
+                <div v-for="day in weekDays" :key="day.date" class="calendar-day-head">
+                  <strong>{{ day.weekday }}</strong>
+                  <span>{{ day.display }}</span>
+                </div>
+
+                <template v-for="slot in dutySlots" :key="slot.key">
+                  <div class="calendar-slot-head">
+                    <strong>{{ slot.label }}</strong>
+                    <span>{{ slot.time }}</span>
+                  </div>
+                  <button
+                    v-for="day in weekDays"
+                    :key="`${day.date}-${slot.key}`"
+                    type="button"
+                    class="calendar-cell"
+                    :class="{
+                      'is-active': isSelectedSlot(day.date, slot.key),
+                      'is-empty': !getDutyCell(day.date, slot.key),
+                      'is-today': day.isToday
+                    }"
+                    @click="selectDutySlot(day, slot)"
+                  >
+                    <template v-if="getDutyCell(day.date, slot.key)">
+                      <div class="cell-top">
+                        <div class="cell-title-group">
+                          <span class="cell-assignee">{{ getDutyCell(day.date, slot.key).assigneeName || '未填写' }}</span>
+                        </div>
+                      </div>
+                      <div class="cell-status-row">
+                        <el-tag size="small" :type="getStatusType(getDutyCell(day.date, slot.key).status)" class="custom-tag compact-tag">
+                          {{ getStatusLabel(getDutyCell(day.date, slot.key).status) }}
+                        </el-tag>
+                        <span
+                          v-if="isDefaultFilledCell(day.date, slot.key)"
+                          class="default-badge"
+                        >
+                          默认
+                        </span>
+                      </div>
+                      <p class="cell-phone" :title="getDutyCell(day.date, slot.key).assigneePhone || '未留电话'">
+                        {{ getDutyCell(day.date, slot.key).assigneePhone || '未留电话' }}
+                      </p>
+                      <p class="cell-note">{{ getDutyCell(day.date, slot.key).note || '点击可继续编辑该时段安排' }}</p>
+                    </template>
+                    <template v-else>
+                      <span class="empty-plus">+</span>
+                      <span class="empty-copy">点击填写{{ slot.label }}</span>
+                    </template>
+                  </button>
+                </template>
+              </div>
+            </article>
+
+            <article v-if="selectedDutySlot.date" class="sub-card panel-fade-in" style="animation-delay: 0.1s;">
               <div class="sub-head">
                 <div class="head-left">
-                  <h3>新增 / 编辑值班</h3>
-                  <span>支持白班、晚班、周末等班次</span>
+                  <h3>{{ dutyForm.id ? '编辑值班信息' : '新增值班信息' }}</h3>
+                  <span>{{ selectedDutySummary }}</span>
                 </div>
               </div>
               <el-form label-position="top" class="custom-form">
@@ -44,27 +114,29 @@
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="班次">
-                      <el-input v-model="dutyForm.shiftName" placeholder="如：白班 / 晚班" />
+                      <el-select v-model="dutyForm.shiftName" style="width: 100%">
+                        <el-option v-for="slot in dutySlots" :key="slot.key" :label="slot.label" :value="slot.label" />
+                      </el-select>
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="值班人">
-                      <el-input v-model="dutyForm.assigneeName" />
+                      <el-input v-model="dutyForm.assigneeName" placeholder="填写值班人姓名" />
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="值班电话">
-                      <el-input v-model="dutyForm.assigneePhone" />
+                      <el-input v-model="dutyForm.assigneePhone" placeholder="填写联系电话" />
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="备岗人">
-                      <el-input v-model="dutyForm.backupName" />
+                      <el-input v-model="dutyForm.backupName" placeholder="无人可留空" />
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="备岗电话">
-                      <el-input v-model="dutyForm.backupPhone" />
+                      <el-input v-model="dutyForm.backupPhone" placeholder="备岗联系方式" />
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
@@ -79,48 +151,28 @@
                   </el-col>
                   <el-col :span="24">
                     <el-form-item label="备注">
-                      <el-input v-model="dutyForm.note" placeholder="选填，输入特殊交接事项..." />
+                      <el-input v-model="dutyForm.note" type="textarea" :rows="3" placeholder="填写交接事项、重点巡检内容或临时提醒" />
                     </el-form-item>
                   </el-col>
                 </el-row>
               </el-form>
               <div class="action-row">
+                <el-button type="warning" plain @click="toggleDutyDefault">
+                  {{ hasDefaultForSelectedSlot ? '取消默认排班' : '设为默认排班' }}
+                </el-button>
                 <el-button @click="resetDutyForm">清空</el-button>
                 <el-button type="primary" :loading="savingDuty" @click="saveDuty" class="hover-lift">保存值班</el-button>
               </div>
             </article>
 
-            <!-- 右侧：列表 -->
-            <article class="sub-card table-card panel-fade-in" style="animation-delay: 0.1s;">
+            <article v-else class="sub-card panel-fade-in duty-empty-state" style="animation-delay: 0.1s;">
               <div class="sub-head">
                 <div class="head-left">
-                  <h3>值班列表</h3>
-                  <span class="count-badge">{{ dutyRows.length }} 条</span>
+                  <h3>选择时段后再编辑</h3>
+                  <span>先点击左侧周日历中的任意一个早 / 中 / 晚时段，再填写值班信息。</span>
                 </div>
               </div>
-              <div class="table-wrapper">
-                <el-table :data="dutyRows" style="width: 100%">
-                  <el-table-column prop="dutyDate" label="日期" min-width="110" />
-                  <el-table-column prop="shiftName" label="班次" min-width="90" />
-                  <el-table-column prop="assigneeName" label="值班人" min-width="100" />
-                  <el-table-column prop="status" label="状态" width="100">
-                    <template #default="{ row }">
-                      <el-tag size="small" :type="getStatusType(row.status)" effect="light" class="custom-tag">
-                        {{ getStatusLabel(row.status) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="180" fixed="right" align="right">
-                    <template #default="{ row }">
-                      <div class="row-actions">
-                        <el-button link type="primary" @click="editDuty(row)">编辑</el-button>
-                        <el-button link type="warning" @click="quickDutyStatus(row, 'on_duty')">值班</el-button>
-                        <el-button link type="success" @click="quickDutyStatus(row, 'completed')">完成</el-button>
-                      </div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
+              <el-empty description="当前还没有选中具体时段" />
             </article>
           </div>
         </el-tab-pane>
@@ -338,7 +390,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { RefreshRight, Calendar, Warning, Phone } from '@element-plus/icons-vue'
 
@@ -361,11 +413,14 @@ const loading = ref(false)
 const savingDuty = ref(false)
 const savingIncident = ref(false)
 const savingContact = ref(false)
+const applyingDutyDefaults = ref(false)
 
 const dutyRows = ref([])
 const incidentRows = ref([])
 const contactRows = ref([])
 const labOptions = ref([])
+const dutyDefaultTemplates = ref({})
+const dutyDefaultStorageKey = 'lab_admin_duty_defaults'
 
 const dutyForm = reactive({
   id: null, dutyDate: '', shiftName: '', assigneeName: '', assigneePhone: '', backupName: '', backupPhone: '', status: 'scheduled', note: ''
@@ -377,6 +432,54 @@ const incidentForm = reactive({
 
 const contactForm = reactive({
   id: null, name: '', roleName: '', phone: '', priorityNo: 10, status: 'active', description: ''
+})
+
+
+const dutySlots = [
+  { key: 'morning', label: '早班', time: '08:00 - 12:00', aliases: ['早班', '白班', '上午'] },
+  { key: 'midday', label: '中班', time: '12:00 - 18:00', aliases: ['中班', '午班', '中午', '下午'] },
+  { key: 'evening', label: '晚班', time: '18:00 - 22:00', aliases: ['晚班', '夜班'] }
+]
+
+const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const selectedDutySlot = ref({ date: '', slotKey: '' })
+const currentWeekStart = ref(getWeekStart(new Date()))
+
+const weekDays = computed(() => {
+  return Array.from({ length: 7 }, (_, index) => {
+    const value = addDays(currentWeekStart.value, index)
+    const date = formatDate(value)
+    const today = formatDate(new Date())
+    return {
+      date,
+      weekday: weekdayLabels[index],
+      display: `${String(value.getMonth() + 1).padStart(2, '0')}/${String(value.getDate()).padStart(2, '0')}`,
+      isToday: date === today
+    }
+  })
+})
+
+const weekRangeLabel = computed(() => {
+  const first = weekDays.value[0]
+  const last = weekDays.value[weekDays.value.length - 1]
+  return first && last ? `${first.date} - ${last.date}` : ''
+})
+
+const selectedDutySummary = computed(() => {
+  const slot = dutySlots.find((item) => item.key === selectedDutySlot.value.slotKey)
+  if (!selectedDutySlot.value.date || !slot) {
+    return '请选择日期、时段，并填写对应值班信息。'
+  }
+  return `正在编辑 ${selectedDutySlot.value.date} ${slot.label} 的值班安排。`
+})
+
+const selectedDutyDefaultKey = computed(() => {
+  if (!selectedDutySlot.value.date || !selectedDutySlot.value.slotKey) return ''
+  return getDefaultTemplateKey(selectedDutySlot.value.date, selectedDutySlot.value.slotKey)
+})
+
+const hasDefaultForSelectedSlot = computed(() => {
+  return Boolean(selectedDutyDefaultKey.value && dutyDefaultTemplates.value[selectedDutyDefaultKey.value])
 })
 
 // --- UI 辅助函数 ---
@@ -395,9 +498,170 @@ const getLevelLabel = (level) => {
   return map[level] || level
 }
 
+function getWeekStart(input) {
+  const value = new Date(input)
+  value.setHours(0, 0, 0, 0)
+  const day = value.getDay() || 7
+  value.setDate(value.getDate() - day + 1)
+  return value
+}
+
+function addDays(input, days) {
+  const value = new Date(input)
+  value.setDate(value.getDate() + days)
+  return value
+}
+
+function formatDate(input) {
+  const value = new Date(input)
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getWeekdayIndex(dateText) {
+  const value = new Date(dateText)
+  const day = value.getDay() || 7
+  return day - 1
+}
+
+function getDefaultTemplateKey(dateText, slotKey) {
+  return `${getWeekdayIndex(dateText)}-${slotKey}`
+}
+
+function loadDutyDefaultTemplates() {
+  try {
+    const raw = localStorage.getItem(dutyDefaultStorageKey)
+    dutyDefaultTemplates.value = raw ? JSON.parse(raw) : {}
+  } catch (error) {
+    dutyDefaultTemplates.value = {}
+  }
+}
+
+function saveDutyDefaultTemplates() {
+  localStorage.setItem(dutyDefaultStorageKey, JSON.stringify(dutyDefaultTemplates.value))
+}
+
+function buildDefaultDutyTemplate(slot) {
+  return {
+    shiftName: slot?.label || dutyForm.shiftName || '',
+    assigneeName: dutyForm.assigneeName || '',
+    assigneePhone: dutyForm.assigneePhone || '',
+    backupName: dutyForm.backupName || '',
+    backupPhone: dutyForm.backupPhone || '',
+    note: dutyForm.note || '',
+    status: dutyForm.status || 'scheduled'
+  }
+}
+
+function applyDefaultTemplateToForm(template, day, slot) {
+  resetDutyForm()
+  selectedDutySlot.value = { date: day.date, slotKey: slot.key }
+  dutyForm.dutyDate = day.date
+  dutyForm.shiftName = slot.label
+  dutyForm.assigneeName = template.assigneeName || ''
+  dutyForm.assigneePhone = template.assigneePhone || ''
+  dutyForm.backupName = template.backupName || ''
+  dutyForm.backupPhone = template.backupPhone || ''
+  dutyForm.note = template.note || ''
+  dutyForm.status = template.status || 'scheduled'
+}
+
+function resolveDutySlot(shiftName) {
+  const source = String(shiftName || '').trim()
+  return dutySlots.find((slot) => slot.aliases.some((alias) => source.includes(alias))) || null
+}
+
+function getDutyCell(date, slotKey) {
+  return dutyRows.value.find((row) => row.dutyDate === date && resolveDutySlot(row.shiftName)?.key === slotKey) || null
+}
+
+function isSelectedSlot(date, slotKey) {
+  return selectedDutySlot.value.date === date && selectedDutySlot.value.slotKey === slotKey
+}
+
+function isDefaultFilledCell(date, slotKey) {
+  const key = getDefaultTemplateKey(date, slotKey)
+  const row = getDutyCell(date, slotKey)
+  if (!key || !row) return false
+  const template = dutyDefaultTemplates.value[key]
+  if (!template) return false
+
+  return (
+    (template.assigneeName || '') === (row.assigneeName || '') &&
+    (template.assigneePhone || '') === (row.assigneePhone || '') &&
+    (template.backupName || '') === (row.backupName || '') &&
+    (template.backupPhone || '') === (row.backupPhone || '') &&
+    (template.note || '') === (row.note || '') &&
+    (template.status || 'scheduled') === (row.status || 'scheduled')
+  )
+}
+
+function selectDutySlot(day, slot) {
+  const row = getDutyCell(day.date, slot.key)
+  selectedDutySlot.value = { date: day.date, slotKey: slot.key }
+  if (row) {
+    editDuty(row)
+    return
+  }
+  const template = dutyDefaultTemplates.value[getDefaultTemplateKey(day.date, slot.key)]
+  if (template) {
+    applyDefaultTemplateToForm(template, day, slot)
+    return
+  }
+  resetDutyForm()
+  selectedDutySlot.value = { date: day.date, slotKey: slot.key }
+  dutyForm.dutyDate = day.date
+  dutyForm.shiftName = slot.label
+}
+
+async function ensureDutyDefaultsForCurrentWeek() {
+  if (applyingDutyDefaults.value) return
+  const drafts = []
+  weekDays.value.forEach((day) => {
+    dutySlots.forEach((slot) => {
+      const template = dutyDefaultTemplates.value[getDefaultTemplateKey(day.date, slot.key)]
+      if (!template) return
+      if (getDutyCell(day.date, slot.key)) return
+      drafts.push({
+        dutyDate: day.date,
+        shiftName: slot.label,
+        assigneeName: template.assigneeName || '',
+        assigneePhone: template.assigneePhone || '',
+        backupName: template.backupName || '',
+        backupPhone: template.backupPhone || '',
+        note: template.note || '',
+        status: template.status || 'scheduled'
+      })
+    })
+  })
+  if (!drafts.length) return
+
+  applyingDutyDefaults.value = true
+  try {
+    await Promise.all(drafts.map((item) => saveDutyRoster(item)))
+    const dutyRes = await getDutyRoster({}).catch(() => ({ data: { data: [] } }))
+    dutyRows.value = Array.isArray(dutyRes.data?.data) ? dutyRes.data.data : []
+  } finally {
+    applyingDutyDefaults.value = false
+  }
+}
+
+async function changeWeek(offset) {
+  currentWeekStart.value = addDays(currentWeekStart.value, offset * 7)
+  await ensureDutyDefaultsForCurrentWeek()
+}
+
+async function goCurrentWeek() {
+  currentWeekStart.value = getWeekStart(new Date())
+  await ensureDutyDefaultsForCurrentWeek()
+}
+
 // --- 业务逻辑保持原样 ---
 function resetDutyForm() {
   dutyForm.id = null; dutyForm.dutyDate = ''; dutyForm.shiftName = ''; dutyForm.assigneeName = ''; dutyForm.assigneePhone = ''; dutyForm.backupName = ''; dutyForm.backupPhone = ''; dutyForm.status = 'scheduled'; dutyForm.note = ''
+  selectedDutySlot.value = { date: '', slotKey: '' }
 }
 
 function resetIncidentForm() {
@@ -406,6 +670,36 @@ function resetIncidentForm() {
 
 function resetContactForm() {
   contactForm.id = null; contactForm.name = ''; contactForm.roleName = ''; contactForm.phone = ''; contactForm.priorityNo = 10; contactForm.status = 'active'; contactForm.description = ''
+}
+
+function toggleDutyDefault() {
+  if (!selectedDutySlot.value.date || !selectedDutySlot.value.slotKey) {
+    ElMessage.info('请先选择一个具体时段')
+    return
+  }
+  const key = selectedDutyDefaultKey.value
+  if (!key) return
+
+  if (hasDefaultForSelectedSlot.value) {
+    const next = { ...dutyDefaultTemplates.value }
+    delete next[key]
+    dutyDefaultTemplates.value = next
+    saveDutyDefaultTemplates()
+    ElMessage.success('已取消该时段的默认排班')
+    return
+  }
+
+  if (!dutyForm.assigneeName) {
+    ElMessage.warning('请先填写值班人，再设为默认排班')
+    return
+  }
+
+  dutyDefaultTemplates.value = {
+    ...dutyDefaultTemplates.value,
+    [key]: buildDefaultDutyTemplate(dutySlots.find((item) => item.key === selectedDutySlot.value.slotKey))
+  }
+  saveDutyDefaultTemplates()
+  ElMessage.success('已设为默认排班，下一周同一时段会自动带出')
 }
 
 function syncIncidentLabName() {
@@ -426,6 +720,7 @@ async function loadAll() {
     dutyRows.value = Array.isArray(dutyRes.data?.data) ? dutyRes.data.data : []
     incidentRows.value = Array.isArray(incidentRes.data?.data) ? incidentRes.data.data : []
     contactRows.value = Array.isArray(contactRes.data?.data) ? contactRes.data.data : []
+    await ensureDutyDefaultsForCurrentWeek()
   } finally {
     loading.value = false
   }
@@ -439,13 +734,26 @@ async function saveDuty() {
   savingDuty.value = true
   try {
     await saveDutyRoster({ ...dutyForm })
+    if (hasDefaultForSelectedSlot.value && selectedDutyDefaultKey.value) {
+      dutyDefaultTemplates.value = {
+        ...dutyDefaultTemplates.value,
+        [selectedDutyDefaultKey.value]: buildDefaultDutyTemplate(dutySlots.find((item) => item.key === selectedDutySlot.value.slotKey))
+      }
+      saveDutyDefaultTemplates()
+    }
     ElMessage.success('值班信息已保存')
     resetDutyForm()
     await loadAll()
   } catch (e) {} finally { savingDuty.value = false }
 }
 
-function editDuty(row) { Object.assign(dutyForm, { ...row }) }
+function editDuty(row) {
+  Object.assign(dutyForm, { ...row })
+  selectedDutySlot.value = {
+    date: row.dutyDate || '',
+    slotKey: resolveDutySlot(row.shiftName)?.key || ''
+  }
+}
 
 async function quickDutyStatus(row, status) {
   try {
@@ -507,7 +815,10 @@ async function deleteContactRecord(row) {
   } catch (e) { /* 用户取消或失败 */ }
 }
 
-onMounted(() => { loadAll() })
+onMounted(() => {
+  loadDutyDefaultTemplates()
+  loadAll()
+})
 </script>
 
 <style scoped lang="scss">
@@ -624,6 +935,12 @@ $shadow-danger-hover: 0 15px 35px rgba(239, 68, 68, 0.08);
   gap: 24px;
 }
 
+.duty-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(360px, 1fr);
+  gap: 24px;
+}
+
 /* --- 子卡片 (表单区与表格区) --- */
 .sub-card {
   background: #f8fafc; border-radius: $radius-md; padding: 24px;
@@ -652,6 +969,208 @@ $shadow-danger-hover: 0 15px 35px rgba(239, 68, 68, 0.08);
 .table-card .sub-head { padding: 20px 24px 0 24px; margin-bottom: 16px; }
 
 .action-row { display: flex; justify-content: flex-end; gap: 12px; margin-top: auto; padding-top: 24px; }
+
+.calendar-card {
+  overflow: hidden;
+}
+
+.duty-calendar-head {
+  gap: 16px;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-range {
+  color: $text-regular;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.duty-calendar {
+  display: grid;
+  grid-template-columns: 100px repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.calendar-corner,
+.calendar-day-head,
+.calendar-slot-head,
+.calendar-cell {
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: #ffffff;
+}
+
+.calendar-corner,
+.calendar-day-head,
+.calendar-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 62px;
+  padding: 12px;
+}
+
+.calendar-corner,
+.calendar-slot-head {
+  flex-direction: column;
+  background: #f8fafc;
+}
+
+.calendar-day-head {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calendar-day-head strong,
+.calendar-slot-head strong {
+  color: $text-main;
+  font-size: 14px;
+}
+
+.calendar-day-head span,
+.calendar-slot-head span {
+  color: $text-light;
+  font-size: 12px;
+}
+
+.calendar-cell {
+  min-height: 132px;
+  padding: 12px 10px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.calendar-cell:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: $shadow-hover;
+  transform: translateY(-1px);
+}
+
+.calendar-cell.is-empty {
+  align-items: center;
+  justify-content: center;
+  color: $text-light;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.calendar-cell.is-active {
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.calendar-cell.is-today {
+  background: linear-gradient(180deg, #ffffff, #fff7f7);
+}
+
+.cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cell-title-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.cell-assignee {
+  color: $text-main;
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.default-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.cell-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.compact-tag {
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+.cell-phone,
+.cell-note {
+  margin: 0;
+  color: $text-regular;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cell-phone {
+  color: #475569;
+  font-family: 'DIN Alternate', 'Roboto Mono', 'Consolas', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-note {
+  color: $text-light;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.empty-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.1);
+  color: $primary;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.empty-copy {
+  font-size: 12px;
+}
+
+.duty-empty-state {
+  justify-content: center;
+}
 
 /* --- 表单样式优化 (Academic Minimalist) --- */
 :deep(.custom-form) {
@@ -701,12 +1220,19 @@ $shadow-danger-hover: 0 15px 35px rgba(239, 68, 68, 0.08);
 
 /* --- 响应式 --- */
 @media (max-width: 1200px) {
-  .tab-grid { grid-template-columns: 1fr; }
+  .tab-grid,
+  .duty-layout { grid-template-columns: 1fr; }
   .table-card { min-height: 400px; }
 }
 
 @media (max-width: 768px) {
   .hero-content, .sub-head { flex-direction: column; align-items: flex-start; }
   .page-container { padding: 16px; }
+  .calendar-toolbar { width: 100%; }
+  .duty-calendar {
+    grid-template-columns: 84px repeat(7, minmax(120px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
 }
 </style>

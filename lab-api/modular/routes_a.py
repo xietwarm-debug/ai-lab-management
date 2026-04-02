@@ -1,4 +1,6 @@
 from . import core as _core
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 
 for _k, _v in _core.__dict__.items():
     if _k.startswith("__"):
@@ -11,6 +13,15 @@ USER_ROLES = {"student", "teacher", "admin"}
 ROLE_ALIAS = {"user": "student"}
 DEFAULT_ADMIN_RESET_PASSWORD = str(os.getenv("ADMIN_RESET_PASSWORD_DEFAULT", "123456") or "123456")
 KNOWLEDGE_DOC_STATUS_SET = {"draft", "active", "disabled"}
+KNOWLEDGE_UPLOAD_EXTENSIONS = {
+    ".txt": "text",
+    ".md": "markdown",
+    ".csv": "csv",
+    ".docx": "word",
+    ".xlsx": "excel",
+    ".pdf": "pdf",
+}
+KNOWLEDGE_QUERY_PROCESS_STATUS_SET = {"pending", "resolved", "ignored"}
 DUTY_STATUS_SET = {"scheduled", "on_duty", "completed", "closed"}
 EMERGENCY_CONTACT_STATUS_SET = {"active", "inactive"}
 INCIDENT_LEVEL_SET = {"low", "medium", "high", "critical"}
@@ -77,6 +88,20 @@ def _build_in_placeholders(items):
     if not arr:
         return "", []
     return ",".join(["%s"] * len(arr)), arr
+
+
+def _parse_page_and_size(page_raw, page_size_raw, default_page=1, default_page_size=20):
+    try:
+        page = int(str(page_raw or default_page).strip())
+    except (TypeError, ValueError):
+        page = int(default_page)
+    try:
+        page_size = int(str(page_size_raw or default_page_size).strip())
+    except (TypeError, ValueError):
+        page_size = int(default_page_size)
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    return page, page_size, (page - 1) * page_size
 
 
 def _normalize_usernames(value):
@@ -216,8 +241,173 @@ def _normalize_knowledge_doc_payload(payload, *, allow_partial=False):
     }
 
 
+def _knowledge_sanitize_upload_file_name(raw_name):
+    name = str(raw_name or "").strip().replace("\\", "/")
+    name = name.split("/")[-1]
+    name = re.sub(r"[\r\n\t]+", "", name).strip()
+    if not name:
+        raise BizError("filename required", 400)
+    if len(name) > 180:
+        name = name[-180:]
+    return name
+
+
+def _knowledge_clean_file_stem(raw_name):
+    stem = os.path.splitext(str(raw_name or "").strip())[0].strip()
+    stem = re.sub(r"\s+", " ", stem)
+    stem = stem.strip("._- ")
+    return stem[:200] or "未命名文档"
+
+
+def _knowledge_build_store_name(file_name):
+    name = _knowledge_sanitize_upload_file_name(file_name)
+    ext = str(os.path.splitext(name)[1] or "").strip().lower()
+    stem = os.path.splitext(name)[0]
+    safe_stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", stem).strip("._-")
+    if not safe_stem:
+        safe_stem = "knowledge"
+    if len(safe_stem) > 80:
+        safe_stem = safe_stem[:80]
+    safe_ext = ext if re.match(r"^\.[A-Za-z0-9]{1,10}$", ext or "") else ""
+    return f"{uuid.uuid4().hex}__{safe_stem}{safe_ext}"
+
+
+def _knowledge_display_file_name(source_url):
+    base_name = os.path.basename(str(source_url or "").strip().replace("\\", "/"))
+    if "__" in base_name:
+        base_name = base_name.split("__", 1)[1]
+    return base_name
+
+
+def _knowledge_read_text_file(file_path):
+    last_error = None
+    for encoding in ("utf-8", "utf-8-sig", "gb18030", "gbk"):
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                return f.read()
+        except Exception as exc:
+            last_error = exc
+    raise BizError(f"failed to read text file: {last_error}", 400)
+
+
+def _knowledge_extract_csv_text(file_path):
+    last_error = None
+    for encoding in ("utf-8", "utf-8-sig", "gb18030", "gbk"):
+        try:
+            with open(file_path, "r", encoding=encoding, newline="") as f:
+                reader = csv.reader(f)
+                lines = []
+                for row in reader:
+                    cells = [str(cell or "").strip() for cell in row]
+                    if any(cells):
+                        lines.append(" | ".join(cells))
+                return "\n".join(lines)
+        except Exception as exc:
+            last_error = exc
+    raise BizError(f"failed to parse csv file: {last_error}", 400)
+
+
+def _knowledge_extract_docx_text(file_path):
+    try:
+        with ZipFile(file_path, "r") as zf:
+            xml_bytes = zf.read("word/document.xml")
+    except KeyError:
+        raise BizError("invalid docx file", 400)
+    except Exception as exc:
+        raise BizError(f"failed to open docx file: {exc}", 400)
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception as exc:
+        raise BizError(f"failed to parse docx xml: {exc}", 400)
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    lines = []
+    for para in root.findall(".//w:p", ns):
+        texts = []
+        for node in para.findall(".//w:t", ns):
+            if node.text:
+                texts.append(str(node.text))
+        line = "".join(texts).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _knowledge_extract_xlsx_text(file_path):
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise BizError(f"xlsx parser unavailable: {exc}", 500)
+
+    try:
+        workbook = load_workbook(filename=file_path, data_only=True, read_only=True)
+    except Exception as exc:
+        raise BizError(f"failed to open xlsx file: {exc}", 400)
+
+    lines = []
+    try:
+        for sheet in workbook.worksheets:
+            lines.append(f"工作表：{sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                values = [str(cell).strip() for cell in row if cell not in (None, "")]
+                if values:
+                    lines.append(" | ".join(values))
+    finally:
+        try:
+            workbook.close()
+        except Exception:
+            pass
+    return "\n".join(lines)
+
+
+def _knowledge_extract_pdf_text(file_path):
+    try:
+        from pypdf import PdfReader
+    except Exception as exc:
+        raise BizError(f"pdf parser unavailable: {exc}", 500)
+
+    try:
+        reader = PdfReader(file_path)
+    except Exception as exc:
+        raise BizError(f"failed to open pdf file: {exc}", 400)
+
+    lines = []
+    for page in reader.pages:
+        try:
+            page_text = str(page.extract_text() or "").strip()
+        except Exception:
+            page_text = ""
+        if page_text:
+            lines.append(page_text)
+    return "\n\n".join(lines)
+
+
+def _knowledge_extract_uploaded_text(file_path, ext):
+    suffix = str(ext or "").strip().lower()
+    if suffix in {".txt", ".md"}:
+        content = _knowledge_read_text_file(file_path)
+    elif suffix == ".csv":
+        content = _knowledge_extract_csv_text(file_path)
+    elif suffix == ".docx":
+        content = _knowledge_extract_docx_text(file_path)
+    elif suffix == ".xlsx":
+        content = _knowledge_extract_xlsx_text(file_path)
+    elif suffix == ".pdf":
+        content = _knowledge_extract_pdf_text(file_path)
+    else:
+        raise BizError("unsupported file type", 400)
+    content = str(content or "").strip()
+    if not content:
+        raise BizError("document content is empty after parsing", 400)
+    if len(content) > 200000:
+        content = content[:200000]
+    return content
+
+
 def _format_knowledge_document_row(row):
     item = dict(row or {})
+    source_url = str(item.get("sourceUrl") or "").strip()
     return {
         "id": int(item.get("id") or 0),
         "title": str(item.get("title") or "").strip(),
@@ -225,7 +415,8 @@ def _format_knowledge_document_row(row):
         "scopeRole": str(item.get("scopeRole") or "").strip() or "all",
         "status": str(item.get("status") or "").strip() or "draft",
         "sourceType": str(item.get("sourceType") or "").strip() or "text",
-        "sourceUrl": str(item.get("sourceUrl") or "").strip(),
+        "sourceUrl": source_url,
+        "fileName": _knowledge_display_file_name(source_url),
         "summary": str(item.get("summary") or "").strip(),
         "keywords": str(item.get("keywords") or "").strip(),
         "chunkCount": int(item.get("chunkCount") or 0),
@@ -1040,11 +1231,196 @@ def agent_chat():
     if not user_name:
         return _agent_response(code=401, msg="unauthorized", reply="登录状态失效，请重新登录。", action="error", http_status=401)
 
+    # --- Inject uploaded file context ---
+    raw_file_ids = data.get("fileIds")
+    file_context_parts = []
+    if isinstance(raw_file_ids, list) and raw_file_ids:
+        safe_ids = [int(fid) for fid in raw_file_ids if str(fid).strip().isdigit()][:5]
+        if safe_ids:
+            placeholders = ",".join(["%s"] * len(safe_ids))
+            file_rows = query(
+                f"SELECT original_name, extracted_text, store_path, file_ext FROM agent_file WHERE id IN ({placeholders}) AND user_name=%s",
+                tuple(safe_ids) + (user_name,),
+            )
+            for fr in (file_rows or []):
+                fname = str(fr.get("original_name") or "").strip()
+                fcontent = str(fr.get("extracted_text") or "").strip()
+                fpath = str(fr.get("store_path") or "").strip()
+                ext = str(fr.get("file_ext") or "").strip().lower()
+
+                if not fcontent and fpath and ext in [".xlsx", ".xls", ".csv"]:
+                    import pandas as pd
+                    import os
+                    from .core import UPLOAD_DIR
+                    try:
+                        abs_path = os.path.join(UPLOAD_DIR, fpath)
+                        if ext == ".csv":
+                            df = pd.read_csv(abs_path)
+                        else:
+                            df = pd.read_excel(abs_path)
+                        fcontent = df.head(20).to_string(index=False)
+                    except Exception as e:
+                        print(f"Failed to extract {fname} dynamically: {e}")
+
+                if fcontent:
+                    truncated = fcontent[:6000]
+                    file_context_parts.append(f"[文件: {fname}]\n{truncated}")
+    file_context_block = ""
+    if file_context_parts:
+        file_context_block = "\n\n".join(file_context_parts)
+    # --- End file context injection ---
+
     rule_payload = get_reservation_rules_payload()
     pending_ctx = _agent_pending_get(user_name)
     period_time_text = _extract_time_from_period_expression(text)
     fallback_date_text = _extract_date_from_text(text)
     fallback_lab_name = _extract_lab_name_from_text(text)
+    normalized_role = current_role.lower()
+
+    # For admin dashboard-style questions, answer directly from live stats
+    # instead of falling back to KB snippets.
+    if normalized_role == "admin" and not str((pending_ctx or {}).get("intent") or "").strip():
+        try:
+            dashboard_answer = _answer_admin_stats_question(text, _get_admin_dashboard_snapshot())
+        except Exception:
+            dashboard_answer = {}
+        if bool((dashboard_answer or {}).get("matched")):
+            save_agent_chat_message(user_name, "user", text, action="user_input")
+            reply = str((dashboard_answer or {}).get("answer") or "").strip()
+            action = str((dashboard_answer or {}).get("intent") or "admin_stats").strip() or "admin_stats"
+            meta = {
+                "sources": [
+                    {
+                        "title": "管理后台统计快照",
+                        "url": "/admin/stats/dashboard",
+                    }
+                ]
+            }
+            if reply:
+                save_agent_chat_message(user_name, "assistant", reply, action=action, meta=meta)
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply,
+                action=action,
+                extra=meta,
+                http_status=200,
+            )
+
+    # --- DeepSeek Asset Import Injection ---
+    if file_context_block and "导入" in text and ("资产" in text or "设备" in text or "耗材" in text):
+        try:
+            import json
+            import uuid
+            import urllib.request
+            from modular.core import SILICONFLOW_API_KEY, SILICONFLOW_BASE_URL
+            
+            ds_key = SILICONFLOW_API_KEY
+            base_url = SILICONFLOW_BASE_URL or "https://api.siliconflow.cn"
+            
+            system_fields = ["asset_name", "category", "location", "status", "price"]
+            prompt = f"""
+            你是一个资产管理系统助手。用户上传了包含资产数据的文本：
+            {file_context_block[:4000]}
+            
+            系统的标准字段: {system_fields}
+            
+            请提取表格数据，映射到标准字段，并格式化前5条返回。
+            要求强制输出JSON:
+            {{
+               "mapping": {{"用户表格中的列名": "系统标准字段"}},
+               "preview": [ {{"asset_name": "...", "category": "..."}} ],
+               "total_count": 提取出的总行数
+            }}
+            """
+            
+            req_data = json.dumps({
+                "model": "deepseek-ai/DeepSeek-V3", # SiliconFlow path
+                "messages": [
+                    {"role": "system", "content": "你是一个只输出 JSON 格式数据的系统助手。"},
+                    {"role": "user", "content": prompt}
+                ],
+                "response_format": {"type": "json_object"}
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(
+                f"{base_url}/v1/chat/completions",
+                data=req_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {ds_key}"
+                }
+            )
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                resp_json = json.loads(response.read().decode('utf-8'))
+                ai_text = resp_json["choices"][0]["message"]["content"]
+                ai_result = json.loads(ai_text)
+            task_id = "import_" + uuid.uuid4().hex
+            
+            if not hasattr(app, "import_cache"):
+                app.import_cache = {}
+            app.import_cache[task_id] = {
+                "file_context": file_context_block,
+                "file_ids": safe_ids if "safe_ids" in locals() else [],
+                "mapping": ai_result.get("mapping", {}),
+                "total_count": ai_result.get("total_count", 0),
+                "user_name": user_name
+            }
+            
+            save_agent_chat_message(user_name, "user", text, action="user_input")
+            reply_text = f"我已经读取了您发送的文件数据，成功匹配到标准格式！发现了大约 **{ai_result.get('total_count', 0)}** 条记录。需要为您导入系统吗？"
+            action = "import_confirmation"
+            meta = {
+                "preview_data": ai_result.get("preview", []),
+                "task_id": task_id,
+                "total_count": ai_result.get("total_count", 0)
+            }
+            save_agent_chat_message(user_name, "assistant", reply_text, action=action, meta=meta)
+            
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply_text,
+                action=action,
+                extra=meta,
+                http_status=200,
+            )
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[DeepSeek] Import Error: {e}")
+            if "401" in err_msg or "Unauthorized" in err_msg:
+                reply_text = "资产导入失败：DeepSeek API 密钥未配置或无效，请在环境中设置正确的 `DEEPSEEK_API_KEY`。"
+            else:
+                reply_text = f"读取表格时大模型服务异常：{err_msg}"
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply_text,
+                action="general_reply",
+                http_status=200
+            )
+
+    if not str((pending_ctx or {}).get("intent") or "").strip():
+        try:
+            asset_answer = answer_asset_basic_question(text, g.current_user or {}, limit=5)
+        except Exception:
+            asset_answer = {}
+        if bool((asset_answer or {}).get("matched")):
+            save_agent_chat_message(user_name, "user", text, action="user_input")
+            reply = str((asset_answer or {}).get("answer") or "").strip()
+            action = str((asset_answer or {}).get("intent") or "asset_summary").strip() or "asset_summary"
+            meta = {"sources": (asset_answer or {}).get("sources") or []}
+            if reply:
+                save_agent_chat_message(user_name, "assistant", reply, action=action, meta=meta)
+            return _agent_response(
+                code=0,
+                msg="ok",
+                reply=reply,
+                action=action,
+                extra=meta,
+                http_status=200,
+            )
 
     tool_call = _agent_translate_intent(
         text=text,
@@ -1218,6 +1594,39 @@ def agent_chat():
                 result = _agent_build_need_more_info_response(current_intent, initial_slots, initial_missing)
 
     if result is None:
+        op = str((tool_call or {}).get("op") or "").strip()
+        if file_context_block and op in {"", "general_reply"}:
+            from modular.core import search_knowledge_chunks, _call_siliconflow_chat, SILICONFLOW_API_KEY
+            # Retrieve KB hits using original text
+            hits = search_knowledge_chunks(text, current_role=current_role, limit=3)
+            evidence_blocks = []
+            if hits and float((hits[0] or {}).get("score") or 0) >= 1.2:
+                for idx, item in enumerate(hits[:3], start=1):
+                    evidence_blocks.append(f"[{idx}] {item.get('title')}：{item.get('chunkText')}")
+            
+            prompt = "你是高校实验室跨领域智能助手。请结合指定的知识库片段和用户上传的文件资料，详细准确地回答问题。如果都没有涉及相关信息，再根据你的常识进行解答。"
+            user_content = f"用户的问题：{text}\n\n"
+            if evidence_blocks:
+                user_content += "【知识库参考片段】\n" + "\n".join(evidence_blocks) + "\n\n"
+            if file_context_block:
+                user_content += "【用户上传的文件内容】\n" + file_context_block
+                
+            if SILICONFLOW_API_KEY:
+                try:
+                    reply_text = _call_siliconflow_chat([
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_content}
+                    ], temperature=0.3)
+                    reply_str = str(reply_text or "").strip()
+                    if reply_str:
+                        meta = {}
+                        if evidence_blocks:
+                            meta["sources"] = [{"title": h.get("title"), "chunkText": h.get("chunkText")} for h in hits[:3]]
+                        save_agent_chat_message(user_name, "assistant", reply_str, action="file_qa", meta=meta)
+                        return _agent_response(code=0, msg="ok", reply=reply_str, action="file_qa", extra=meta, http_status=200)
+                except Exception as e:
+                    pass
+
         result = _agent_execute_tool(
             tool_call=tool_call,
             user_name=user_name,
@@ -1260,6 +1669,12 @@ def agent_chat():
                 )
             if compact_sources:
                 meta["sources"] = compact_sources
+        if isinstance(data.get("pending"), dict):
+            meta["pending"] = data.get("pending")
+        if isinstance(data.get("questions"), list):
+            meta["questions"] = data.get("questions")[:8]
+        if isinstance(data.get("plans"), list):
+            meta["plans"] = data.get("plans")[:6]
         if reply:
             save_agent_chat_message(user_name, "assistant", reply, action=action, meta=meta)
     except Exception:
@@ -1293,6 +1708,327 @@ def clear_agent_history():
         actor={"id": g.current_user.get("id"), "username": user_name, "role": g.current_user.get("role")},
     )
     return jsonify({"code": 0, "msg": "ok", "data": {"cleared": cleared}})
+
+
+AGENT_FILE_UPLOAD_EXTENSIONS = {
+    ".txt": "text",
+    ".md": "markdown",
+    ".csv": "csv",
+    ".docx": "word",
+    ".xlsx": "excel",
+    ".pdf": "pdf",
+}
+AGENT_FILE_MAX_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def _format_agent_file_row(row):
+    row = row if isinstance(row, dict) else {}
+    return {
+        "id": int(row.get("id") or 0),
+        "userName": str(row.get("userName") or row.get("user_name") or "").strip(),
+        "originalName": str(row.get("originalName") or row.get("original_name") or "").strip(),
+        "fileExt": str(row.get("fileExt") or row.get("file_ext") or "").strip(),
+        "fileSize": int(row.get("fileSize") or row.get("file_size") or 0),
+        "inKnowledge": bool(int(row.get("inKnowledge") or row.get("in_knowledge") or 0)),
+        "knowledgeDocId": _to_int_or_none(row.get("knowledgeDocId") or row.get("knowledge_doc_id")),
+        "createdAt": str(row.get("createdAt") or row.get("created_at") or "").strip(),
+        "updatedAt": str(row.get("updatedAt") or row.get("updated_at") or "").strip(),
+    }
+
+
+@app.post("/agent/files/upload")
+@auth_required()
+def agent_upload_file():
+    if "file" not in request.files:
+        return jsonify({"ok": False, "msg": "file required"}), 400
+
+    upload_file = request.files["file"]
+    raw_name = _knowledge_sanitize_upload_file_name(getattr(upload_file, "filename", ""))
+    ext = str(os.path.splitext(raw_name)[1] or "").strip().lower()
+    if ext not in AGENT_FILE_UPLOAD_EXTENSIONS:
+        return jsonify({"ok": False, "msg": f"不支持的文件类型，仅支持: {', '.join(AGENT_FILE_UPLOAD_EXTENSIONS.keys())}"}), 400
+
+    user_name = str((g.current_user or {}).get("username") or "").strip()
+    if not user_name:
+        return jsonify({"ok": False, "msg": "unauthorized"}), 401
+
+    actor = g.current_user or {}
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    store_dir = os.path.join(UPLOAD_DIR, "agent_files")
+    os.makedirs(store_dir, exist_ok=True)
+    store_name = _knowledge_build_store_name(raw_name)
+    file_path = os.path.join(store_dir, store_name)
+    rel_path = f"agent_files/{store_name}"
+
+    file_id = 0
+    try:
+        upload_file.save(file_path)
+        file_size = os.path.getsize(file_path)
+        if file_size > AGENT_FILE_MAX_SIZE:
+            os.remove(file_path)
+            return jsonify({"ok": False, "msg": "文件大小不能超过 20MB"}), 400
+
+        content = _knowledge_extract_uploaded_text(file_path, ext)
+
+        def _tx(cur):
+            cur.execute(
+                """
+                INSERT INTO agent_file (
+                    user_name, original_name, store_path, file_ext, file_size,
+                    extracted_text, in_knowledge, knowledge_doc_id, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, 0, NULL, %s, %s)
+                """,
+                (
+                    user_name,
+                    raw_name[:255],
+                    rel_path[:500],
+                    ext[:20],
+                    file_size,
+                    content,
+                    now_text,
+                    now_text,
+                ),
+            )
+            return int(cur.lastrowid or 0)
+
+        file_id = run_in_transaction(_tx)
+    except Exception:
+        try:
+            if not file_id and os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+        raise
+
+    audit_log(
+        "agent.file.upload",
+        target_type="agent_file",
+        target_id=file_id,
+        detail={"originalName": raw_name, "fileExt": ext, "fileSize": file_size},
+        actor={"id": actor.get("id"), "username": user_name, "role": actor.get("role")},
+    )
+    rows = query(
+        """
+        SELECT id,
+               user_name AS userName,
+               original_name AS originalName,
+               file_ext AS fileExt,
+               file_size AS fileSize,
+               in_knowledge AS inKnowledge,
+               knowledge_doc_id AS knowledgeDocId,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM agent_file
+        WHERE id=%s
+        LIMIT 1
+        """,
+        (file_id,),
+    )
+    return jsonify({"ok": True, "data": _format_agent_file_row((rows or [{}])[0])})
+
+
+@app.get("/agent/files")
+@auth_required()
+def agent_list_files():
+    user_name = str((g.current_user or {}).get("username") or "").strip()
+    if not user_name:
+        return jsonify({"ok": False, "msg": "unauthorized"}), 401
+
+    rows = query(
+        """
+        SELECT id,
+               user_name AS userName,
+               original_name AS originalName,
+               file_ext AS fileExt,
+               file_size AS fileSize,
+               in_knowledge AS inKnowledge,
+               knowledge_doc_id AS knowledgeDocId,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM agent_file
+        WHERE user_name=%s
+        ORDER BY created_at DESC
+        LIMIT 100
+        """,
+        (user_name,),
+    )
+    return jsonify({"ok": True, "data": {"files": [_format_agent_file_row(r) for r in (rows or [])]}})
+
+
+@app.delete("/agent/files/<int:file_id>")
+@auth_required()
+def agent_delete_file(file_id):
+    user_name = str((g.current_user or {}).get("username") or "").strip()
+    if not user_name:
+        return jsonify({"ok": False, "msg": "unauthorized"}), 401
+
+    rows = query(
+        "SELECT id, store_path AS storePath, knowledge_doc_id AS knowledgeDocId FROM agent_file WHERE id=%s AND user_name=%s LIMIT 1",
+        (file_id, user_name),
+    )
+    if not rows:
+        return jsonify({"ok": False, "msg": "file not found"}), 404
+
+    row = rows[0]
+    store_path = str(row.get("storePath") or "").strip()
+    knowledge_doc_id = _to_int_or_none(row.get("knowledgeDocId"))
+
+    def _tx(cur):
+        cur.execute("DELETE FROM agent_file WHERE id=%s AND user_name=%s", (file_id, user_name))
+        if knowledge_doc_id:
+            cur.execute(
+                "UPDATE knowledge_document SET status='disabled', updated_at=%s WHERE id=%s",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), knowledge_doc_id),
+            )
+
+    run_in_transaction(_tx)
+
+    if store_path:
+        try:
+            abs_path = os.path.normpath(os.path.join(UPLOAD_DIR, store_path))
+            upload_root = os.path.normpath(UPLOAD_DIR)
+            if abs_path.startswith(upload_root) and os.path.exists(abs_path):
+                os.remove(abs_path)
+        except Exception:
+            pass
+
+    audit_log(
+        "agent.file.delete",
+        target_type="agent_file",
+        target_id=file_id,
+        detail={"storePath": store_path},
+        actor={"id": (g.current_user or {}).get("id"), "username": user_name, "role": (g.current_user or {}).get("role")},
+    )
+    return jsonify({"ok": True, "data": {"deleted": True}})
+
+
+@app.post("/agent/files/<int:file_id>/knowledge")
+@auth_required()
+def agent_toggle_file_knowledge(file_id):
+    user_name = str((g.current_user or {}).get("username") or "").strip()
+    if not user_name:
+        return jsonify({"ok": False, "msg": "unauthorized"}), 401
+
+    data = request.get_json(force=True) or {}
+    in_knowledge = bool(data.get("inKnowledge"))
+
+    rows = query(
+        """
+        SELECT id,
+               original_name AS originalName,
+               store_path AS storePath,
+               file_ext AS fileExt,
+               extracted_text AS extractedText,
+               in_knowledge AS inKnowledge,
+               knowledge_doc_id AS knowledgeDocId
+        FROM agent_file
+        WHERE id=%s AND user_name=%s
+        LIMIT 1
+        """,
+        (file_id, user_name),
+    )
+    if not rows:
+        return jsonify({"ok": False, "msg": "file not found"}), 404
+
+    row = rows[0]
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    actor = g.current_user or {}
+    knowledge_doc_id = _to_int_or_none(row.get("knowledgeDocId"))
+    original_name = str(row.get("originalName") or "").strip()
+    store_path = str(row.get("storePath") or "").strip()
+    file_ext = str(row.get("fileExt") or "").strip()
+    content = str(row.get("extractedText") or "").strip()
+    source_url = f"/uploads/{store_path}" if store_path else ""
+
+    if in_knowledge:
+        if not knowledge_doc_id:
+            title = _knowledge_clean_file_stem(original_name) or original_name
+            category = "manual"
+            scope_role = "all"
+            source_type = KNOWLEDGE_UPLOAD_EXTENSIONS.get(file_ext) or "file"
+
+            def _tx(cur):
+                cur.execute(
+                    """
+                    INSERT INTO knowledge_document (
+                        title, category, scope_role, status, source_type, source_url,
+                        summary, keywords, source_content, chunk_count, last_indexed_at,
+                        uploader_id, uploader_name, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, 'active', %s, %s, '', '', %s, 0, NULL, %s, %s, %s, %s)
+                    """,
+                    (
+                        title[:200],
+                        category,
+                        scope_role,
+                        source_type,
+                        source_url[:500],
+                        content,
+                        _to_int_or_none(actor.get("id")),
+                        str(actor.get("username") or "").strip(),
+                        now_text,
+                        now_text,
+                    ),
+                )
+                return int(cur.lastrowid or 0)
+
+            knowledge_doc_id = run_in_transaction(_tx)
+            try:
+                rebuild_knowledge_document_chunks(knowledge_doc_id)
+            except Exception:
+                pass
+        else:
+            execute(
+                "UPDATE knowledge_document SET status='active', updated_at=%s WHERE id=%s",
+                (now_text, knowledge_doc_id),
+            )
+            try:
+                rebuild_knowledge_document_chunks(knowledge_doc_id)
+            except Exception:
+                pass
+
+        execute(
+            "UPDATE agent_file SET in_knowledge=1, knowledge_doc_id=%s, updated_at=%s WHERE id=%s",
+            (knowledge_doc_id, now_text, file_id),
+        )
+    else:
+        if knowledge_doc_id:
+            execute(
+                "UPDATE knowledge_document SET status='disabled', updated_at=%s WHERE id=%s",
+                (now_text, knowledge_doc_id),
+            )
+        execute(
+            "UPDATE agent_file SET in_knowledge=0, updated_at=%s WHERE id=%s",
+            (now_text, file_id),
+        )
+
+    audit_log(
+        "agent.file.knowledge_toggle",
+        target_type="agent_file",
+        target_id=file_id,
+        detail={"inKnowledge": in_knowledge, "knowledgeDocId": knowledge_doc_id},
+        actor={"id": actor.get("id"), "username": user_name, "role": actor.get("role")},
+    )
+
+    updated_rows = query(
+        """
+        SELECT id,
+               user_name AS userName,
+               original_name AS originalName,
+               file_ext AS fileExt,
+               file_size AS fileSize,
+               in_knowledge AS inKnowledge,
+               knowledge_doc_id AS knowledgeDocId,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM agent_file
+        WHERE id=%s
+        LIMIT 1
+        """,
+        (file_id,),
+    )
+    return jsonify({"ok": True, "data": _format_agent_file_row((updated_rows or [{}])[0])})
 
 
 @app.post("/login")
@@ -2561,6 +3297,53 @@ def list_duty_roster():
     return jsonify({"ok": True, "data": rows})
 
 
+@app.get("/duty-roster")
+@auth_required()
+def list_public_duty_roster():
+    start_date = _normalize_optional_date(request.args.get("startDate"), "startDate")
+    end_date = _normalize_optional_date(request.args.get("endDate"), "endDate")
+    status = str(request.args.get("status") or "").strip().lower()
+    if status and status not in DUTY_STATUS_SET:
+        raise BizError("invalid status", 400)
+    if start_date and end_date and start_date > end_date:
+        raise BizError("invalid date range", 400)
+
+    where_sql = " WHERE 1=1"
+    params = []
+    if start_date:
+        where_sql += " AND duty_date>=%s"
+        params.append(start_date)
+    if end_date:
+        where_sql += " AND duty_date<=%s"
+        params.append(end_date)
+    if status:
+        where_sql += " AND status=%s"
+        params.append(status)
+
+    rows = query(
+        """
+        SELECT id,
+               duty_date AS dutyDate,
+               shift_name AS shiftName,
+               assignee_name AS assigneeName,
+               assignee_phone AS assigneePhone,
+               backup_name AS backupName,
+               backup_phone AS backupPhone,
+               status,
+               note,
+               updated_at AS updatedAt
+        FROM duty_roster
+        """
+        + where_sql
+        + " ORDER BY duty_date ASC, id ASC",
+        tuple(params),
+    )
+    for row in rows or []:
+        row["dutyDate"] = str(row.get("dutyDate") or "")
+        row["updatedAt"] = _to_text_time(row.get("updatedAt"))
+    return jsonify({"ok": True, "data": rows})
+
+
 @app.post("/admin/duty-roster")
 @auth_required(roles=["admin"], permissions=[PERMISSION_DUTY_OPERATOR])
 def save_duty_roster():
@@ -2687,6 +3470,38 @@ def list_emergency_contacts():
     )
     for row in rows or []:
         row["createdAt"] = _to_text_time(row.get("createdAt"))
+        row["updatedAt"] = _to_text_time(row.get("updatedAt"))
+    return jsonify({"ok": True, "data": rows})
+
+
+@app.get("/emergency-contacts")
+@auth_required()
+def list_public_emergency_contacts():
+    status = str(request.args.get("status") or "active").strip().lower()
+    if status and status not in EMERGENCY_CONTACT_STATUS_SET:
+        raise BizError("invalid status", 400)
+    where_sql = ""
+    params = []
+    if status:
+        where_sql = " WHERE status=%s"
+        params.append(status)
+    rows = query(
+        """
+        SELECT id,
+               name,
+               role_name AS roleName,
+               phone,
+               priority_no AS priorityNo,
+               status,
+               description,
+               updated_at AS updatedAt
+        FROM emergency_contact
+        """
+        + where_sql
+        + " ORDER BY priority_no ASC, id ASC",
+        tuple(params),
+    )
+    for row in rows or []:
         row["updatedAt"] = _to_text_time(row.get("updatedAt"))
     return jsonify({"ok": True, "data": rows})
 
@@ -4192,6 +5007,7 @@ def admin_refresh_equipment_health():
 def admin_list_knowledge_documents():
     status = str(request.args.get("status") or "").strip().lower()
     category = _knowledge_normalize_category(request.args.get("category"), default_value="")
+    source_type = str(request.args.get("sourceType") or "").strip().lower()
     keyword = str(request.args.get("keyword") or "").strip()
     where_sql = " WHERE 1=1"
     params = []
@@ -4203,6 +5019,9 @@ def admin_list_knowledge_documents():
     if category and category != "other":
         where_sql += " AND category=%s"
         params.append(category)
+    if source_type:
+        where_sql += " AND source_type=%s"
+        params.append(source_type)
     if keyword:
         where_sql += " AND (title LIKE %s OR summary LIKE %s OR keywords LIKE %s)"
         kw = f"%{keyword}%"
@@ -4275,6 +5094,116 @@ def admin_create_knowledge_document():
         target_type="knowledge_document",
         target_id=document_id,
         detail={"category": payload.get("category"), "scopeRole": payload.get("scopeRole"), "chunkCount": index_result.get("chunkCount")},
+        actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
+    )
+    rows = query(
+        """
+        SELECT id,
+               title,
+               category,
+               scope_role AS scopeRole,
+               status,
+               source_type AS sourceType,
+               source_url AS sourceUrl,
+               summary,
+               keywords,
+               chunk_count AS chunkCount,
+               last_indexed_at AS lastIndexedAt,
+               uploader_id AS uploaderId,
+               uploader_name AS uploaderName,
+               created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM knowledge_document
+        WHERE id=%s
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    return jsonify({"ok": True, "data": _format_knowledge_document_row((rows or [{}])[0])})
+
+
+@app.post("/admin/knowledge/documents/upload")
+@auth_required(roles=["admin"])
+def admin_upload_knowledge_document():
+    if "file" not in request.files:
+        raise BizError("file required", 400)
+
+    upload_file = request.files["file"]
+    raw_name = _knowledge_sanitize_upload_file_name(getattr(upload_file, "filename", ""))
+    ext = str(os.path.splitext(raw_name)[1] or "").strip().lower()
+    if ext not in KNOWLEDGE_UPLOAD_EXTENSIONS:
+        raise BizError("unsupported file type", 400)
+
+    title = str(request.form.get("title") or "").strip() or _knowledge_clean_file_stem(raw_name)
+    if len(title) > 200:
+        raise BizError("title too long", 400)
+    category = _knowledge_normalize_category(request.form.get("category"), default_value="manual")
+    scope_role = _knowledge_normalize_scope_role(request.form.get("scopeRole"), default_value="all")
+    status = str(request.form.get("status") or "active").strip().lower()
+    if status not in KNOWLEDGE_DOC_STATUS_SET:
+        raise BizError("invalid status", 400)
+
+    actor = g.current_user or {}
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    store_dir = os.path.join(UPLOAD_DIR, "knowledge")
+    os.makedirs(store_dir, exist_ok=True)
+    store_name = _knowledge_build_store_name(raw_name)
+    file_path = os.path.join(store_dir, store_name)
+    rel_path = f"knowledge/{store_name}"
+    source_url = f"/uploads/{rel_path}"
+    document_id = 0
+
+    try:
+        upload_file.save(file_path)
+        content = _knowledge_extract_uploaded_text(file_path, ext)
+
+        def _tx(cur):
+            cur.execute(
+                """
+                INSERT INTO knowledge_document (
+                    title, category, scope_role, status, source_type, source_url,
+                    summary, keywords, source_content, chunk_count, last_indexed_at,
+                    uploader_id, uploader_name, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, '', '', %s, 0, NULL, %s, %s, %s, %s)
+                """,
+                (
+                    title,
+                    category,
+                    scope_role,
+                    status,
+                    KNOWLEDGE_UPLOAD_EXTENSIONS.get(ext) or "file",
+                    source_url[:500],
+                    content,
+                    _to_int_or_none(actor.get("id")),
+                    str(actor.get("username") or "").strip(),
+                    now_text,
+                    now_text,
+                ),
+            )
+            return int(cur.lastrowid or 0)
+
+        document_id = run_in_transaction(_tx)
+        index_result = rebuild_knowledge_document_chunks(document_id)
+    except Exception:
+        try:
+            if not document_id and os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+        raise
+
+    audit_log(
+        "admin.knowledge.document.upload",
+        target_type="knowledge_document",
+        target_id=document_id,
+        detail={
+            "category": category,
+            "scopeRole": scope_role,
+            "sourceType": KNOWLEDGE_UPLOAD_EXTENSIONS.get(ext) or "file",
+            "chunkCount": index_result.get("chunkCount"),
+            "sourceUrl": source_url,
+        },
         actor={"id": actor.get("id"), "username": actor.get("username"), "role": actor.get("role")},
     )
     rows = query(
@@ -4421,6 +5350,74 @@ def admin_reindex_knowledge_document(doc_id):
     return jsonify({"ok": True, "data": result})
 
 
+def _knowledge_query_group_expr():
+    return "COALESCE(NULLIF(query_hash,''), CONCAT('legacy-', CAST(id AS CHAR)))"
+
+
+def _parse_knowledge_query_group_key(group_key):
+    raw = str(group_key or "").strip()
+    if not raw:
+        raise BizError("groupKey required", 400)
+    if raw.startswith("legacy-"):
+        try:
+            legacy_id = int(raw.split("-", 1)[1])
+        except (TypeError, ValueError):
+            raise BizError("invalid groupKey", 400)
+        if int(legacy_id) <= 0:
+            raise BizError("invalid groupKey", 400)
+        return {"legacyId": int(legacy_id), "queryHash": ""}
+    if not re.fullmatch(r"[0-9a-f]{40}", raw.lower()):
+        raise BizError("invalid groupKey", 400)
+    return {"legacyId": 0, "queryHash": raw.lower()}
+
+
+def _build_knowledge_group_where_sql(group_key):
+    parsed = _parse_knowledge_query_group_key(group_key)
+    if parsed.get("queryHash"):
+        return "matched_flag=0 AND query_hash=%s", [str(parsed.get("queryHash") or "")]
+    return "matched_flag=0 AND id=%s", [int(parsed.get("legacyId") or 0)]
+
+
+def _normalize_knowledge_process_status(value):
+    status = str(value or "").strip().lower()
+    if not status:
+        return ""
+    if status not in KNOWLEDGE_QUERY_PROCESS_STATUS_SET:
+        raise BizError("invalid processStatus", 400)
+    return status
+
+
+def _build_unmatched_question_filters(include_process_status=True):
+    keyword = str(request.args.get("keyword") or "").strip()
+    role = str(request.args.get("role") or "").strip().lower()
+    source_scene = str(request.args.get("sourceScene") or "").strip().lower()
+    process_status = _normalize_knowledge_process_status(request.args.get("processStatus")) if include_process_status else ""
+
+    where_sql = " WHERE matched_flag=0"
+    params = []
+    if keyword:
+        kw = f"%{keyword}%"
+        where_sql += " AND (query_text LIKE %s OR normalized_query LIKE %s OR username LIKE %s)"
+        params.extend([kw, kw, kw])
+    if role:
+        where_sql += " AND role=%s"
+        params.append(role)
+    if source_scene:
+        where_sql += " AND source_scene=%s"
+        params.append(source_scene)
+    if include_process_status and process_status:
+        where_sql += " AND COALESCE(process_status, 'pending')=%s"
+        params.append(process_status)
+    return {
+        "whereSql": where_sql,
+        "params": params,
+        "keyword": keyword,
+        "role": role,
+        "sourceScene": source_scene,
+        "processStatus": process_status,
+    }
+
+
 @app.post("/knowledge/ask")
 @auth_required()
 def ask_knowledge():
@@ -4430,9 +5427,20 @@ def ask_knowledge():
         raise BizError("question required", 400)
     current_user = g.current_user or {}
     current_role = str(current_user.get("role") or "").strip().lower()
-    result = ask_knowledge_base(question, current_role=current_role, actor=current_user)
+    result = ask_knowledge_base(question, current_role=current_role, actor=current_user, source_scene="knowledge")
     if not result.get("matched"):
-        return jsonify({"ok": True, "data": {"matched": False, "answer": "", "sources": [], "queryLogId": 0}})
+        return jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "matched": False,
+                    "answer": "",
+                    "sources": [],
+                    "queryLogId": int(result.get("queryLogId") or 0),
+                    "missReason": str(result.get("missReason") or "").strip(),
+                },
+            }
+        )
     return jsonify(
         {
             "ok": True,
@@ -4441,6 +5449,267 @@ def ask_knowledge():
                 "answer": str(result.get("answer") or "").strip(),
                 "sources": result.get("sources") or [],
                 "queryLogId": int(result.get("queryLogId") or 0),
+            },
+        }
+    )
+
+
+@app.get("/admin/knowledge/unmatched-questions")
+@auth_required(roles=["admin"])
+def admin_list_unmatched_knowledge_questions():
+    page, page_size, offset = _parse_page_and_size(
+        request.args.get("page", "1"),
+        request.args.get("pageSize", request.args.get("limit", "20")),
+    )
+    filters = _build_unmatched_question_filters(include_process_status=True)
+    summary_filters = _build_unmatched_question_filters(include_process_status=False)
+    group_expr = _knowledge_query_group_expr()
+
+    total_rows = query(
+        f"""
+        SELECT COUNT(*) AS cnt
+        FROM (
+            SELECT {group_expr} AS group_key
+            FROM knowledge_query_log
+            {filters["whereSql"]}
+            GROUP BY group_key
+        ) grouped
+        """,
+        tuple(filters["params"]),
+    )
+    total = int((total_rows[0] or {}).get("cnt") or 0) if total_rows else 0
+
+    grouped_rows = query(
+        f"""
+        SELECT {group_expr} AS groupKey,
+               MAX(id) AS latestId,
+               COUNT(*) AS repeatCount,
+               MIN(created_at) AS firstAskedAt,
+               MAX(created_at) AS lastAskedAt,
+               COALESCE(MAX(process_status), 'pending') AS processStatus,
+               MAX(resolved_document_id) AS resolvedDocumentId,
+               MAX(resolved_by) AS resolvedBy,
+               MAX(resolved_at) AS resolvedAt
+        FROM knowledge_query_log
+        {filters["whereSql"]}
+        GROUP BY groupKey
+        ORDER BY lastAskedAt DESC, latestId DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(list(filters["params"]) + [page_size, offset]),
+    )
+
+    latest_ids = [int(row.get("latestId") or 0) for row in (grouped_rows or []) if int(row.get("latestId") or 0) > 0]
+    latest_row_map = {}
+    if latest_ids:
+        placeholders = ",".join(["%s"] * len(latest_ids))
+        latest_rows = query(
+            f"""
+            SELECT id,
+                   query_text AS question,
+                   username,
+                   role,
+                   miss_reason AS missReason,
+                   source_scene AS sourceScene,
+                   query_hash AS queryHash,
+                   created_at AS createdAt
+            FROM knowledge_query_log
+            WHERE id IN ({placeholders})
+            """,
+            tuple(latest_ids),
+        )
+        latest_row_map = {int(row.get("id") or 0): row for row in (latest_rows or [])}
+
+    resolved_document_ids = [int(row.get("resolvedDocumentId") or 0) for row in (grouped_rows or []) if int(row.get("resolvedDocumentId") or 0) > 0]
+    resolved_doc_map = {}
+    if resolved_document_ids:
+        placeholders = ",".join(["%s"] * len(resolved_document_ids))
+        doc_rows = query(
+            f"SELECT id, title FROM knowledge_document WHERE id IN ({placeholders})",
+            tuple(resolved_document_ids),
+        )
+        resolved_doc_map = {int(row.get("id") or 0): str(row.get("title") or "").strip() for row in (doc_rows or [])}
+
+    summary_rows = query(
+        f"""
+        SELECT COALESCE(process_status, 'pending') AS processStatus,
+               COUNT(DISTINCT {group_expr}) AS cnt
+        FROM knowledge_query_log
+        {summary_filters["whereSql"]}
+        GROUP BY COALESCE(process_status, 'pending')
+        """,
+        tuple(summary_filters["params"]),
+    )
+    summary_map = {"pending": 0, "resolved": 0, "ignored": 0}
+    for row in summary_rows or []:
+        status = str(row.get("processStatus") or "pending").strip().lower()
+        if status in summary_map:
+            summary_map[status] = int(row.get("cnt") or 0)
+
+    data = []
+    for row in grouped_rows or []:
+        latest_id = int(row.get("latestId") or 0)
+        latest = latest_row_map.get(latest_id, {})
+        resolved_document_id = int(row.get("resolvedDocumentId") or 0)
+        data.append(
+            {
+                "groupKey": str(row.get("groupKey") or "").strip(),
+                "latestId": latest_id,
+                "question": str(latest.get("question") or "").strip(),
+                "username": str(latest.get("username") or "").strip(),
+                "role": str(latest.get("role") or "").strip(),
+                "missReason": str(latest.get("missReason") or "").strip(),
+                "sourceScene": str(latest.get("sourceScene") or "").strip(),
+                "queryHash": str(latest.get("queryHash") or "").strip(),
+                "repeatCount": int(row.get("repeatCount") or 0),
+                "firstAskedAt": _to_text_time(row.get("firstAskedAt")),
+                "lastAskedAt": _to_text_time(row.get("lastAskedAt")),
+                "processStatus": str(row.get("processStatus") or "pending").strip() or "pending",
+                "resolvedDocumentId": resolved_document_id or None,
+                "resolvedDocumentTitle": resolved_doc_map.get(resolved_document_id, ""),
+                "resolvedBy": str(row.get("resolvedBy") or "").strip(),
+                "resolvedAt": _to_text_time(row.get("resolvedAt")),
+                "latestCreatedAt": _to_text_time(latest.get("createdAt")),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "data": data,
+            "meta": {
+                "page": page,
+                "pageSize": page_size,
+                "total": total,
+            },
+            "summary": {
+                "pending": int(summary_map.get("pending") or 0),
+                "resolved": int(summary_map.get("resolved") or 0),
+                "ignored": int(summary_map.get("ignored") or 0),
+                "total": int(sum(summary_map.values())),
+            },
+        }
+    )
+
+
+@app.get("/admin/knowledge/unmatched-questions/<group_key>")
+@auth_required(roles=["admin"])
+def admin_get_unmatched_knowledge_question_detail(group_key):
+    where_sql, params = _build_knowledge_group_where_sql(group_key)
+    rows = query(
+        f"""
+        SELECT id,
+               query_text AS question,
+               username,
+               role,
+               miss_reason AS missReason,
+               source_scene AS sourceScene,
+               process_status AS processStatus,
+               resolved_document_id AS resolvedDocumentId,
+               resolved_by AS resolvedBy,
+               resolved_at AS resolvedAt,
+               created_at AS createdAt
+        FROM knowledge_query_log
+        WHERE {where_sql}
+        ORDER BY id DESC
+        LIMIT 20
+        """,
+        tuple(params),
+    )
+    if not rows:
+        raise BizError("unmatched question group not found", 404)
+
+    resolved_document_id = int((rows[0] or {}).get("resolvedDocumentId") or 0)
+    resolved_document = None
+    if resolved_document_id > 0:
+        doc_rows = query("SELECT id, title, status FROM knowledge_document WHERE id=%s LIMIT 1", (resolved_document_id,))
+        if doc_rows:
+            doc_row = doc_rows[0] or {}
+            resolved_document = {
+                "id": int(doc_row.get("id") or 0),
+                "title": str(doc_row.get("title") or "").strip(),
+                "status": str(doc_row.get("status") or "").strip(),
+            }
+
+    examples = []
+    for row in rows or []:
+        examples.append(
+            {
+                "id": int(row.get("id") or 0),
+                "question": str(row.get("question") or "").strip(),
+                "username": str(row.get("username") or "").strip(),
+                "role": str(row.get("role") or "").strip(),
+                "missReason": str(row.get("missReason") or "").strip(),
+                "sourceScene": str(row.get("sourceScene") or "").strip(),
+                "processStatus": str(row.get("processStatus") or "pending").strip() or "pending",
+                "createdAt": _to_text_time(row.get("createdAt")),
+            }
+        )
+
+    latest_row = rows[0] or {}
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "groupKey": str(group_key or "").strip(),
+                "question": str(latest_row.get("question") or "").strip(),
+                "processStatus": str(latest_row.get("processStatus") or "pending").strip() or "pending",
+                "resolvedBy": str(latest_row.get("resolvedBy") or "").strip(),
+                "resolvedAt": _to_text_time(latest_row.get("resolvedAt")),
+                "resolvedDocument": resolved_document,
+                "examples": examples,
+            },
+        }
+    )
+
+
+@app.post("/admin/knowledge/unmatched-questions/status")
+@auth_required(roles=["admin"])
+def admin_update_unmatched_knowledge_question_status():
+    payload = request.get_json(force=True) or {}
+    group_key = str(payload.get("groupKey") or "").strip()
+    process_status = _normalize_knowledge_process_status(payload.get("processStatus"))
+    if not process_status:
+        raise BizError("processStatus required", 400)
+
+    resolved_document_id = _normalize_optional_int(payload.get("resolvedDocumentId"), "resolvedDocumentId", min_value=1, max_value=999999999)
+    if process_status == "resolved" and resolved_document_id:
+        exists = query("SELECT id FROM knowledge_document WHERE id=%s LIMIT 1", (int(resolved_document_id),))
+        if not exists:
+            raise BizError("knowledge document not found", 404)
+
+    where_sql, params = _build_knowledge_group_where_sql(group_key)
+    matched_rows = query(f"SELECT COUNT(*) AS cnt FROM knowledge_query_log WHERE {where_sql}", tuple(params))
+    if not matched_rows or int((matched_rows[0] or {}).get("cnt") or 0) <= 0:
+        raise BizError("unmatched question group not found", 404)
+
+    current_user = g.current_user or {}
+    resolved_by = str(current_user.get("username") or "").strip()
+    resolved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if process_status == "resolved" else None
+    document_value = int(resolved_document_id) if process_status == "resolved" and resolved_document_id else None
+    if process_status != "resolved":
+        resolved_by = ""
+
+    execute(
+        f"""
+        UPDATE knowledge_query_log
+        SET process_status=%s,
+            resolved_document_id=%s,
+            resolved_by=%s,
+            resolved_at=%s
+        WHERE {where_sql}
+        """,
+        tuple([process_status, document_value, resolved_by, resolved_at] + params),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "groupKey": group_key,
+                "processStatus": process_status,
+                "resolvedDocumentId": document_value,
+                "resolvedBy": resolved_by,
+                "resolvedAt": resolved_at,
             },
         }
     )
@@ -5472,5 +6741,3 @@ def batch_deactivate_graduates():
             },
         }
     )
-
-

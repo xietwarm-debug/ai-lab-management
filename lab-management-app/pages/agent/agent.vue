@@ -26,7 +26,7 @@
               <image class="defaultGif" src="/static/1.gif" mode="aspectFill"></image>
             </view>
             <view class="defaultText">
-              我可以帮你处理预约、改期、取消、报修、查进度和规则解释，也可以联网搜索最新资讯、官网和文档。你可以直接说需求，也可以点下面的快捷入口。
+              我可以帮你处理预约、改期、取消、报修、查进度和规则解释；如果账号已开通资产只读权限，也可以直接查设备状态、借用情况和到期提醒。你可以直接说需求，也可以点下面的快捷入口。
             </view>
           </view>
           <view v-if="messages.length > 0" class="bubbleList">
@@ -63,6 +63,9 @@
                 </view>
                 <view v-if="item.meta" class="bubbleMeta" :class="{ bubbleWarn: item.tone === 'warn' }">
                   {{ item.meta }}
+                </view>
+                <view v-if="item.role !== 'user' && item.helper" class="bubbleActions">
+                  <view class="bubbleActionButton" @click.stop="openHelperPanel(item.helper)">补充信息</view>
                 </view>
               </view>
             </view>
@@ -113,16 +116,267 @@
 
         <view v-if="recording" class="hintText">正在录音，点击麦克风结束并发送</view>
       </view>
+
+      <view v-if="helperVisible" class="helperOverlay" @click="closeHelperPanel">
+        <view class="helperSheet" @click.stop>
+          <view class="helperHandle"></view>
+          <view class="helperHeader">
+            <view>
+              <view class="helperTitle">{{ helperPanelTitle }}</view>
+              <view class="helperDesc">直接点选后发送给宁宁，继续完成当前处理。</view>
+            </view>
+            <view class="helperClose" @click="closeHelperPanel">收起</view>
+          </view>
+
+          <view v-if="activeHelperMissingSlots.length > 0" class="helperSection">
+            <view class="helperLabel">当前还缺</view>
+            <view class="helperTagRow">
+              <view v-for="slot in activeHelperMissingSlots" :key="slot" class="helperTag">{{ helperSlotLabel(slot) }}</view>
+            </view>
+          </view>
+
+          <view v-if="activeHelperQuestions.length > 0" class="helperSection">
+            <view class="helperLabel">助手提示</view>
+            <view v-for="item in activeHelperQuestions" :key="item.key || item.question" class="helperTip">
+              {{ item.question }}
+            </view>
+          </view>
+
+          <view v-if="activeHelperPlans.length > 0" class="helperSection">
+            <view class="helperLabel">可选方案</view>
+            <view
+              v-for="plan in activeHelperPlans"
+              :key="plan.planId"
+              class="helperPlanCard"
+              :class="{ active: helperForm.selectedPlanId === plan.planId }"
+              @click="selectHelperPlan(plan)"
+            >
+              <view class="helperPlanTop">
+                <text class="helperPlanId">{{ plan.planId }}</text>
+                <text class="helperPlanLab">{{ plan.labName || "-" }}</text>
+              </view>
+              <view class="helperPlanMeta">{{ plan.date || "-" }} {{ plan.time || "-" }}</view>
+              <view v-if="plan.reason" class="helperPlanMeta">{{ plan.reason }}</view>
+            </view>
+          </view>
+
+          <view v-if="shouldShowHelperField('labName')" class="helperSection">
+            <view class="helperLabel">实验室</view>
+            <view class="helperChipRow">
+              <view
+                v-for="lab in helperLabOptions"
+                :key="lab.id || lab.name"
+                class="helperChip"
+                :class="{ active: helperForm.labName === lab.name }"
+                @click="helperForm.labName = lab.name"
+              >
+                {{ lab.name }}
+              </view>
+            </view>
+          </view>
+
+          <view v-if="shouldShowHelperField('date')" class="helperSection">
+            <view class="helperLabel">日期</view>
+            <view class="helperChipRow">
+              <view
+                v-for="item in helperDateOptions"
+                :key="item.value"
+                class="helperChip"
+                :class="{ active: helperForm.date === item.value }"
+                @click="helperForm.date = item.value"
+              >
+                {{ item.label }}
+              </view>
+            </view>
+          </view>
+
+          <view v-if="shouldShowHelperField('time')" class="helperSection">
+            <view class="helperLabel">时间段</view>
+            <view class="helperChipRow">
+              <view
+                v-for="item in helperTimeOptions"
+                :key="item.value"
+                class="helperChip"
+                :class="{ active: helperForm.time === item.value }"
+                @click="helperForm.time = item.value"
+              >
+                {{ item.label }}
+              </view>
+            </view>
+          </view>
+
+          <view v-if="shouldShowHelperField('reason')" class="helperSection">
+            <view class="helperLabel">用途</view>
+            <textarea class="helperTextarea" v-model.trim="helperForm.reason" placeholder="例如：课程实验、上机考试"></textarea>
+          </view>
+
+          <view v-if="shouldShowHelperField('description')" class="helperSection">
+            <view class="helperLabel">故障描述</view>
+            <textarea class="helperTextarea" v-model.trim="helperForm.description" placeholder="例如：无法开机、蓝屏、断网"></textarea>
+          </view>
+
+          <view v-if="shouldShowHelperField('location')" class="helperSection">
+            <view class="helperLabel">报修位置</view>
+            <input class="helperInput" v-model.trim="helperForm.location" placeholder="例如：A203 物联网实验室" />
+          </view>
+
+          <view v-if="shouldShowHelperField('equipmentHint')" class="helperSection">
+            <view class="helperLabel">设备编号</view>
+            <input class="helperInput" v-model.trim="helperForm.equipmentHint" placeholder="例如：A203-HOST-001" />
+          </view>
+
+          <view class="helperFooter">
+            <view class="helperSecondaryButton" @click="closeHelperPanel">稍后再说</view>
+            <view class="helperPrimaryButton" :class="{ disabled: !canSubmitHelperForm }" @click="submitHelperPanel">发送补充信息</view>
+          </view>
+        </view>
+      </view>
     </view>
   </view>
 </template>
 
 <script>
-import { BASE_URL } from "@/common/api.js"
+import { BASE_URL, listLabs } from "@/common/api.js"
 import { themePageMixin } from "@/common/theme.js"
 
 function profileStorageKey(account) {
   return `user_profile_${account}`
+}
+
+const HELPER_TIME_OPTIONS = [
+  { value: "08:00-08:40", label: "第1节 08:00-08:40" },
+  { value: "08:45-09:35", label: "第2节 08:45-09:35" },
+  { value: "10:25-11:05", label: "第3节 10:25-11:05" },
+  { value: "11:10-11:50", label: "第4节 11:10-11:50" },
+  { value: "14:30-15:10", label: "第5节 14:30-15:10" },
+  { value: "15:15-15:55", label: "第6节 15:15-15:55" },
+  { value: "16:05-16:45", label: "第7节 16:05-16:45" },
+  { value: "16:50-17:30", label: "第8节 16:50-17:30" },
+  { value: "19:00-19:40", label: "第9节 19:00-19:40" },
+  { value: "19:45-20:25", label: "第10节 19:45-20:25" }
+]
+
+function buildHelperDateOptions() {
+  const labels = ["今天", "明天", "后天"]
+  const items = []
+  for (let i = 0; i < 7; i += 1) {
+    const date = new Date()
+    date.setDate(date.getDate() + i)
+    const value = date.toISOString().slice(0, 10)
+    const month = date.getMonth() + 1
+    const day = date.getDate()
+    const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()]
+    const prefix = labels[i] || ""
+    const label = prefix ? `${prefix} ${month}/${day} ${weekday}` : `${month}/${day} ${weekday}`
+    items.push({ value, label })
+  }
+  return items
+}
+
+function normalizeHelperSlotKey(rawKey = "") {
+  const compact = String(rawKey || "")
+    .trim()
+    .replace(/[\s_-]+/g, "")
+    .toLowerCase()
+  if (!compact) return ""
+  if (["lab", "labname", "labid", "room", "classroom"].includes(compact)) return "labName"
+  if (["date", "day"].includes(compact)) return "date"
+  if (["time", "slot", "timeslot", "period"].includes(compact)) return "time"
+  if (["reason", "purpose"].includes(compact)) return "reason"
+  if (["description", "desc", "issue", "fault"].includes(compact)) return "description"
+  if (["location", "place"].includes(compact)) return "location"
+  if (["equipmenthint", "equipmentcode", "assetcode", "devicecode", "equipment"].includes(compact)) return "equipmentHint"
+  if (["selectedplanid", "plan", "planid"].includes(compact)) return "selectedPlanId"
+  return String(rawKey || "").trim()
+}
+
+function inferHelperMissingSlotsFromText(text = "") {
+  const raw = String(text || "").trim()
+  if (!raw) return []
+  const slots = []
+  if (/(实验室|机房|教室|lab)/i.test(raw)) slots.push("labName")
+  if (/(日期|哪天|时间日期|yyyy-mm-dd)/i.test(raw)) slots.push("date")
+  if (/(时间段|时段|几节|08:00|time)/i.test(raw)) slots.push("time")
+  if (/(用途|原因|预约用途)/i.test(raw)) slots.push("reason")
+  if (/(故障描述|故障现象|描述)/i.test(raw)) slots.push("description")
+  if (/(位置|地点|报修位置)/i.test(raw)) slots.push("location")
+  if (/(设备编号|资产编号|编号)/i.test(raw)) slots.push("equipmentHint")
+  if (/(方案|plan)/i.test(raw)) slots.push("selectedPlanId")
+  return [...new Set(slots)]
+}
+
+function normalizeHelperQuestions(rawQuestions) {
+  if (!Array.isArray(rawQuestions)) return []
+  return rawQuestions
+    .map((item) => {
+      const row = item && typeof item === "object" ? item : {}
+      const key = normalizeHelperSlotKey(row.key)
+      const question = String(row.question || "").trim()
+      if (!key && !question) return null
+      return { key, question }
+    })
+    .filter(Boolean)
+}
+
+function normalizeHelperPlans(rawPlans) {
+  if (!Array.isArray(rawPlans)) return []
+  return rawPlans
+    .map((item) => {
+      const row = item && typeof item === "object" ? item : {}
+      const planId = String(row.planId || "").trim()
+      if (!planId) return null
+      return {
+        planId,
+        labName: String(row.labName || "").trim(),
+        date: String(row.date || "").trim(),
+        time: String(row.time || "").trim(),
+        reason: String(row.reason || "").trim()
+      }
+    })
+    .filter(Boolean)
+}
+
+function normalizeHelperPending(rawPending) {
+  const row = rawPending && typeof rawPending === "object" ? rawPending : {}
+  const slots = row.slots && typeof row.slots === "object" ? row.slots : {}
+  const missingRaw = Array.isArray(row.missingSlots)
+    ? row.missingSlots
+    : Array.isArray(row.missing_slots)
+      ? row.missing_slots
+      : []
+  return {
+    intent: String(row.intent || "").trim(),
+    state: String(row.state || "").trim(),
+    slots,
+    missingSlots: missingRaw.map((item) => normalizeHelperSlotKey(item)).filter(Boolean)
+  }
+}
+
+function normalizeAssistantHelper(meta = {}, action = "", replyText = "") {
+  if (String(action || "").trim() !== "ask_info") return null
+  const pending = normalizeHelperPending(meta.pending)
+  const questions = normalizeHelperQuestions(meta.questions)
+  const plans = normalizeHelperPlans(meta.plans)
+  let missingSlots = [...pending.missingSlots]
+  if (missingSlots.length === 0 && questions.length > 0) {
+    missingSlots = questions.map((item) => normalizeHelperSlotKey(item.key)).filter(Boolean)
+  }
+  if (missingSlots.length === 0) {
+    const questionText = questions.map((item) => item.question).join(" ")
+    missingSlots = inferHelperMissingSlotsFromText(`${replyText} ${questionText}`)
+  }
+  missingSlots = [...new Set(missingSlots.filter(Boolean))]
+  if (String(action || "").trim() === "ask_info" && missingSlots.length === 0 && plans.length === 0 && questions.length === 0) {
+    return null
+  }
+  return {
+    intent: pending.intent,
+    state: pending.state,
+    slots: pending.slots,
+    missingSlots,
+    questions,
+    plans
+  }
 }
 
 let wechatSIPlugin = null
@@ -153,16 +407,32 @@ export default {
       messages: [],
       historyLoaded: false,
       loadingHistory: false,
+      helperVisible: false,
+      helperContext: null,
+      helperLabOptions: [],
+      helperForm: {
+        labName: "",
+        date: "",
+        time: "",
+        reason: "",
+        description: "",
+        location: "",
+        equipmentHint: "",
+        selectedPlanId: ""
+      },
+      helperDateOptions: buildHelperDateOptions(),
+      helperTimeOptions: HELPER_TIME_OPTIONS.slice(),
       quickActions: [
         { label: "查我的预约", text: "查看我的预约" },
         { label: "查我的报修", text: "查看我的报修进度" },
+        { label: "查资产状态", text: "帮我查一下资产状态" },
+        { label: "查借出资产", text: "当前借出中的资产有多少" },
         { label: "改期预约", text: "把我的预约改期" },
         { label: "取消预约", text: "取消我的预约" },
         { label: "预约规则", text: "查看预约规则" },
         { label: "安全规范", text: "实验室安全规范有哪些" },
         { label: "设备说明", text: "示波器使用前要注意什么" },
-        { label: "提交报修", text: "我要提交报修" },
-        { label: "搜AI新闻", text: "联网搜索今天 AI 行业最新新闻" }
+        { label: "提交报修", text: "我要提交报修" }
       ]
     }
   },
@@ -178,6 +448,34 @@ export default {
       return {
         bottom: `calc(${height}px + var(--tabbar-height) + env(safe-area-inset-bottom) + 12px)`
       }
+    },
+    helperPanelTitle() {
+      const intent = String((((this.helperContext || {}).intent) || "")).trim()
+      if (intent === "reserve_create") return "补充预约信息"
+      if (intent === "reserve_query") return "补充查询条件"
+      if (intent === "repair_create") return "补充报修信息"
+      return "补充信息"
+    },
+    activeHelperQuestions() {
+      return Array.isArray((this.helperContext || {}).questions) ? this.helperContext.questions : []
+    },
+    activeHelperPlans() {
+      return Array.isArray((this.helperContext || {}).plans) ? this.helperContext.plans : []
+    },
+    activeHelperMissingSlots() {
+      return Array.isArray((this.helperContext || {}).missingSlots) ? this.helperContext.missingSlots : []
+    },
+    canSubmitHelperForm() {
+      return [
+        this.helperForm.selectedPlanId,
+        this.helperForm.labName,
+        this.helperForm.date,
+        this.helperForm.time,
+        this.helperForm.reason,
+        this.helperForm.description,
+        this.helperForm.location,
+        this.helperForm.equipmentHint
+      ].some((item) => Boolean(String(item || "").trim()))
     }
   },
   onLoad() {
@@ -204,7 +502,9 @@ export default {
         text: String(text || ""),
         meta: String(meta || ""),
         tone: String(tone || ""),
-        sources: this.normalizeSources(payload.sources)
+        action: String(payload.action || "").trim(),
+        sources: this.normalizeSources(payload.sources),
+        helper: role === "user" ? null : normalizeAssistantHelper(payload, payload.action, text)
       }
     },
     appendMessage(role, text, meta = "", tone = "", forceScroll = false, extra = {}) {
@@ -215,6 +515,123 @@ export default {
         return
       }
       this.showBackToBottom = this.messages.length > 0
+    },
+    helperSlotLabel(slot) {
+      const key = String(slot || "").trim()
+      if (key === "labName") return "实验室"
+      if (key === "date") return "日期"
+      if (key === "time") return "时间段"
+      if (key === "reason") return "用途"
+      if (key === "description") return "故障描述"
+      if (key === "location") return "报修位置"
+      if (key === "equipmentHint") return "设备编号"
+      if (key === "selectedPlanId") return "方案"
+      return key || "补充信息"
+    },
+    resetHelperForm() {
+      this.helperForm = {
+        labName: "",
+        date: "",
+        time: "",
+        reason: "",
+        description: "",
+        location: "",
+        equipmentHint: "",
+        selectedPlanId: ""
+      }
+    },
+    fillHelperForm(helper) {
+      this.resetHelperForm()
+      const slots = helper && helper.slots && typeof helper.slots === "object" ? helper.slots : {}
+      this.helperForm = {
+        labName: String(slots.labName || "").trim(),
+        date: String(slots.date || "").trim(),
+        time: String(slots.time || "").trim(),
+        reason: String(slots.reason || "").trim(),
+        description: String(slots.description || "").trim(),
+        location: String(slots.location || "").trim(),
+        equipmentHint: String(slots.equipmentHint || "").trim(),
+        selectedPlanId: String(slots.selectedPlanId || "").trim()
+      }
+    },
+    async loadHelperLabs() {
+      if (this.helperLabOptions.length > 0) return
+      try {
+        const response = await listLabs()
+        const rows = Array.isArray(response && response.data && response.data.data) ? response.data.data : []
+        this.helperLabOptions = rows
+          .map((item) => ({
+            id: Number((item || {}).id || 0),
+            name: String((item || {}).name || "").trim()
+          }))
+          .filter((item) => item.name)
+      } catch (error) {
+        this.helperLabOptions = []
+      }
+    },
+    async openHelperPanel(helper) {
+      const payload = helper && typeof helper === "object" ? helper : null
+      if (!payload) return
+      const missingSlots = Array.isArray(payload.missingSlots) ? payload.missingSlots : []
+      const plans = Array.isArray(payload.plans) ? payload.plans : []
+      const questions = Array.isArray(payload.questions) ? payload.questions : []
+      if (missingSlots.length === 0 && plans.length === 0 && questions.length === 0) return
+      this.helperContext = payload
+      this.fillHelperForm(payload)
+      this.helperDateOptions = buildHelperDateOptions()
+      this.helperVisible = true
+      if (Array.isArray(payload.missingSlots) && payload.missingSlots.includes("labName")) {
+        await this.loadHelperLabs()
+      }
+    },
+    closeHelperPanel() {
+      this.helperVisible = false
+    },
+    shouldShowHelperField(field) {
+      if (field === "selectedPlanId") return this.activeHelperPlans.length > 0
+      return this.activeHelperMissingSlots.includes(field)
+    },
+    selectHelperPlan(plan) {
+      const row = plan && typeof plan === "object" ? plan : {}
+      this.helperForm.selectedPlanId = String(row.planId || "").trim()
+      if (row.labName) this.helperForm.labName = row.labName
+      if (row.date) this.helperForm.date = row.date
+      if (row.time) this.helperForm.time = row.time
+    },
+    buildHelperSubmitText() {
+      const intent = String(((this.helperContext || {}).intent) || "").trim()
+      const missingSlots = Array.isArray((this.helperContext || {}).missingSlots) ? this.helperContext.missingSlots : []
+      const lines = []
+      if (intent === "reserve_query" || (!intent && missingSlots.includes("labName") && (missingSlots.includes("date") || this.helperForm.date) && (missingSlots.includes("time") || this.helperForm.time))) {
+        return `帮我查询 ${this.helperForm.labName || "该实验室"} ${this.helperForm.date || ""} ${this.helperForm.time || ""} 是否已被预约`.replace(/\s+/g, " ").trim()
+      }
+      if (intent === "reserve_create") {
+        const reasonText = this.helperForm.reason ? `，用途：${this.helperForm.reason}` : ""
+        return `帮我预约 ${this.helperForm.labName || "该实验室"} ${this.helperForm.date || ""} ${this.helperForm.time || ""}${reasonText}`.replace(/\s+/g, " ").trim()
+      }
+      if (intent === "repair_create") {
+        const target = this.helperForm.equipmentHint || this.helperForm.location || this.helperForm.labName || "该位置"
+        return `帮我提交报修，位置：${target}；故障描述：${this.helperForm.description || "待补充"}`
+      }
+      if (this.helperForm.selectedPlanId) lines.push(`我选择方案 ${this.helperForm.selectedPlanId}`)
+      if (this.helperForm.labName) lines.push(`实验室名称：${this.helperForm.labName}`)
+      if (this.helperForm.date) lines.push(`日期：${this.helperForm.date}`)
+      if (this.helperForm.time) lines.push(`时间段：${this.helperForm.time}`)
+      if (this.helperForm.reason) lines.push(`用途：${this.helperForm.reason}`)
+      if (this.helperForm.description) lines.push(`故障描述：${this.helperForm.description}`)
+      if (this.helperForm.location) lines.push(`报修位置：${this.helperForm.location}`)
+      if (this.helperForm.equipmentHint) lines.push(`设备编号：${this.helperForm.equipmentHint}`)
+      return lines.join("；")
+    },
+    submitHelperPanel() {
+      if (!this.canSubmitHelperForm || this.sending) return
+      const text = this.buildHelperSubmitText()
+      if (!text) {
+        uni.showToast({ title: "请先补充内容", icon: "none" })
+        return
+      }
+      this.helperVisible = false
+      this.sendText(text)
     },
     scrollToBottom(force = false) {
       if (force) {
@@ -351,12 +768,22 @@ export default {
               text,
               role === "assistant" && action ? `动作：${action}` : "",
               "",
-              { sources: meta.sources }
+              {
+                action,
+                sources: meta.sources,
+                pending: meta.pending,
+                questions: meta.questions,
+                plans: meta.plans
+              }
             )
           })
           .filter(Boolean)
         const lastUser = [...this.messages].reverse().find((m) => m && m.role === "user" && m.text)
         this.lastUserText = lastUser ? String(lastUser.text || "").trim() : ""
+        const lastHelper = [...this.messages].reverse().find((m) => m && m.role !== "user" && m.helper)
+        if (lastHelper && lastHelper.helper) {
+          this.openHelperPanel(lastHelper.helper)
+        }
       } catch (e) {
       } finally {
         this.historyLoaded = true
@@ -454,16 +881,31 @@ export default {
           const payload = res.data || {}
           const data = payload.data || {}
           const sources = this.normalizeSources(data.sources)
+          const helperPayload = normalizeAssistantHelper(data, data.action)
           if (payload.code !== 0) {
             const msg = String(payload.msg || "").trim() || "请求失败"
             const reply = String(data.reply || "").trim() || msg || "处理失败，请稍后重试。"
-            this.appendMessage("assistant", reply, msg, "warn", shouldForceReplyScroll, { sources })
+            this.appendMessage("assistant", reply, msg, "warn", shouldForceReplyScroll, {
+              action: data.action,
+              sources,
+              pending: data.pending,
+              questions: data.questions,
+              plans: data.plans
+            })
+            if (helperPayload) this.openHelperPanel(helperPayload)
             return
           }
 
           const reply = data.reply || "\u5df2\u5904\u7406\u5b8c\u6210\u3002"
           const action = data.action || "reply"
-          this.appendMessage("assistant", reply, `\u52a8\u4f5c\uff1a${action}`, "", shouldForceReplyScroll, { sources })
+          this.appendMessage("assistant", reply, `\u52a8\u4f5c\uff1a${action}`, "", shouldForceReplyScroll, {
+            action,
+            sources,
+            pending: data.pending,
+            questions: data.questions,
+            plans: data.plans
+          })
+          if (helperPayload) this.openHelperPanel(helperPayload)
           if (action === "update_profile") {
             this.applyProfilePatch(data.profile || {})
           }
@@ -889,6 +1331,25 @@ page {
   color: var(--danger);
 }
 
+.bubbleActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.bubbleActionButton {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.bubbleActionButton:active {
+  transform: scale(0.98);
+}
+
 .sourcePanel {
   margin-top: 10px;
   padding-top: 10px;
@@ -1163,6 +1624,204 @@ page {
 
 .theme-dark .backToBottomButton {
   background: rgba(30, 41, 59, 0.92);
+}
+
+.helperOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(15, 23, 42, 0.36);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.helperSheet {
+  width: 100%;
+  max-width: 480px;
+  max-height: 78vh;
+  background: var(--color-card-bg);
+  border-radius: 24px 24px 0 0;
+  padding: 12px 16px calc(20px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overflow-y: auto;
+  box-shadow: 0 -18px 40px rgba(15, 23, 42, 0.18);
+}
+
+.helperHandle {
+  width: 48px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.4);
+  margin: 0 auto 12px;
+}
+
+.helperHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.helperTitle {
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.helperDesc {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.helperClose {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-primary);
+  padding-top: 2px;
+}
+
+.helperSection {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--color-bg-soft);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.helperLabel {
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.helperTagRow,
+.helperChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.helperTag,
+.helperChip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.helperChip.active {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--color-primary);
+}
+
+.helperTip {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-primary);
+}
+
+.helperTip + .helperTip {
+  margin-top: 8px;
+}
+
+.helperPlanCard {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.helperPlanCard + .helperPlanCard {
+  margin-top: 10px;
+}
+
+.helperPlanCard.active {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.32);
+}
+
+.helperPlanTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.helperPlanId {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.helperPlanLab,
+.helperPlanMeta {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.helperPlanMeta {
+  margin-top: 6px;
+}
+
+.helperTextarea,
+.helperInput {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 20px;
+  padding: 12px;
+}
+
+.helperTextarea {
+  min-height: 92px;
+}
+
+.helperFooter {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.helperSecondaryButton,
+.helperPrimaryButton {
+  flex: 1;
+  height: 42px;
+  border-radius: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.helperSecondaryButton {
+  background: var(--color-bg-soft);
+  color: var(--color-text-secondary);
+}
+
+.helperPrimaryButton {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.helperPrimaryButton.disabled {
+  opacity: 0.45;
 }
 
 @keyframes fadeIn {

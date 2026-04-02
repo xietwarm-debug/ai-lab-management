@@ -2,9 +2,9 @@
   <div class="audit-page">
     <section class="hero-card">
       <div class="hero-copy">
-        <span class="eyebrow">留痕与追踪</span>
+        <span class="eyebrow">留痕追踪</span>
         <h2>审计日志</h2>
-        <p>按动作、操作人、对象类型和日期筛选关键操作，便于排查误操作与导出归档。</p>
+        <p>按动作、操作人、对象类型和日期快速筛选关键操作，便于追踪问题、复盘流程和导出留档。</p>
       </div>
       <div class="hero-actions">
         <el-button @click="resetFilters">重置</el-button>

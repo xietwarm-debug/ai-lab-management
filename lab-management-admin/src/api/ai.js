@@ -23,7 +23,10 @@ export function refreshAdminAiEquipmentHealth(payload = {}) {
 }
 
 export function chatWithAgent(payload = {}) {
-  return request.post('/agent/chat', payload)
+  return request.post('/agent/chat', payload, {
+    timeout: 45000,
+    silentError: true
+  })
 }
 
 export function getAgentHistory(params = {}) {
@@ -34,4 +37,29 @@ export function getAgentHistory(params = {}) {
 
 export function clearAgentHistory(payload = {}) {
   return request.post('/agent/history/clear', payload)
+}
+
+export function uploadAgentFile(formData) {
+  return request.post('/agent/files/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 60000
+  })
+}
+
+export function getAgentFiles() {
+  return request.get('/agent/files')
+}
+
+export function deleteAgentFile(id) {
+  return request.delete(`/agent/files/${id}`)
+}
+
+export function toggleAgentFileKnowledge(id, payload = {}) {
+  return request.post(`/agent/files/${id}/knowledge`, payload)
+}
+
+export function executeAgentImport(payload = {}) {
+  return request.post('/agent/import-assets/execute', payload)
 }

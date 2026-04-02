@@ -34,19 +34,12 @@ export const MENU_ITEMS = [
     roles: [ROLE_ADMIN, ROLE_TEACHER]
   },
   {
-    key: 'operationsBoard',
-    label: '运营看板',
+    key: 'operationsCenter',
+    label: '\u8fd0\u8425\u4e2d\u5fc3',
     icon: 'TrendCharts',
-    path: '/operations-board',
+    path: '/operations-center',
     roles: [ROLE_ADMIN, ROLE_TEACHER],
     permissions: [PERMISSION_DUTY_OPERATOR]
-  },
-  {
-    key: 'todoCenter',
-    label: '待办中心',
-    icon: 'Memo',
-    path: '/todo-center',
-    roles: [ROLE_ADMIN]
   },
   {
     key: 'notificationCenter',
@@ -56,14 +49,6 @@ export const MENU_ITEMS = [
     roles: [ROLE_ADMIN]
   },
   {
-    key: 'dutyEmergency',
-    label: '值班应急',
-    icon: 'Warning',
-    path: '/duty-emergency',
-    roles: [ROLE_ADMIN],
-    permissions: [PERMISSION_DUTY_OPERATOR]
-  },
-  {
     key: 'lostFound',
     label: '失物招领',
     icon: 'Box',
@@ -71,17 +56,10 @@ export const MENU_ITEMS = [
     roles: [ROLE_ADMIN]
   },
   {
-    key: 'aiAssistant',
-    label: 'AI 助手',
+    key: 'aiKnowledgeCenter',
+    label: 'AI 知识助手',
     icon: 'ChatDotRound',
-    path: '/ai-assistant',
-    roles: [ROLE_ADMIN]
-  },
-  {
-    key: 'knowledgeBase',
-    label: '知识库',
-    icon: 'Document',
-    path: '/knowledge-base',
+    path: '/ai-knowledge-center',
     roles: [ROLE_ADMIN]
   },
   {
@@ -89,13 +67,6 @@ export const MENU_ITEMS = [
     label: '实验室管理',
     icon: 'OfficeBuilding',
     path: '/labs',
-    roles: [ROLE_ADMIN]
-  },
-  {
-    key: 'roomMap',
-    label: '平面图管理',
-    icon: 'Grid',
-    path: '/room-map',
     roles: [ROLE_ADMIN]
   },
   {
@@ -107,33 +78,25 @@ export const MENU_ITEMS = [
     permissions: [PERMISSION_SCHEDULE_MANAGER]
   },
   {
-    key: 'reservations',
-    label: '预约审批',
-    icon: 'Calendar',
-    path: '/reservations',
+    key: 'approvalCenter',
+    label: '\u5ba1\u6279\u4e2d\u5fc3',
+    icon: 'Finished',
+    path: '/approval-center',
     roles: [ROLE_ADMIN, ROLE_TEACHER]
-  },
-  {
-    key: 'reservationRules',
-    label: '审批流配置',
-    icon: 'Operation',
-    path: '/reservation-rules',
-    roles: [ROLE_ADMIN],
-    permissions: [PERMISSION_SCHEDULE_MANAGER]
-  },
-  {
-    key: 'borrowApproval',
-    label: '借用审批',
-    icon: 'DocumentChecked',
-    path: '/borrow-approval',
-    roles: [ROLE_ADMIN],
-    permissions: [PERMISSION_ASSET_MANAGER]
   },
   {
     key: 'equipments',
     label: '资产管理',
     icon: 'Monitor',
     path: '/equipments',
+    roles: [ROLE_ADMIN],
+    permissions: [PERMISSION_ASSET_MANAGER]
+  },
+  {
+    key: 'warehouses',
+    label: '仓库管理',
+    icon: 'HomeFilled',
+    path: '/warehouses',
     roles: [ROLE_ADMIN],
     permissions: [PERMISSION_ASSET_MANAGER]
   },

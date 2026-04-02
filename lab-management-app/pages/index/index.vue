@@ -105,9 +105,10 @@ import { fetchAnnouncementRows } from "@/common/announcements.js"
 import { themePageMixin } from "@/common/theme.js"
 
 const MAX_SHORTCUTS = 6
+const PERMISSION_ASSET_READ_BASIC = "asset.read_basic"
 const DEFAULT_SHORTCUT_KEYS = {
   admin: ["admin_approve", "admin_labs", "admin_equipments", "admin_lostfound", "admin_users", "notifications"],
-  teacher: ["courses", "labs", "reserve", "agent", "notifications", "my"],
+  teacher: ["courses", "teacher_assets", "labs", "reserve", "agent", "my"],
   student: ["courses", "labs", "reserve", "agent", "notifications", "my"],
   guest: ["labs", "reserve", "agent", "notifications", "lostfound", "my"]
 }
@@ -118,6 +119,7 @@ export default {
     return {
       username: "",
       role: "",
+      permissions: [],
       feedList: [],
       feedLoading: false,
       adminPanelLoading: false,
@@ -138,6 +140,9 @@ export default {
   computed: {
     isAdmin() {
       return this.role === "admin"
+    },
+    teacherHasAssetReadPermission() {
+      return this.role === "teacher" && Array.isArray(this.permissions) && this.permissions.includes(PERMISSION_ASSET_READ_BASIC)
     },
     roleText() {
       if (this.role === "admin") return "管理员"
@@ -179,6 +184,7 @@ export default {
       }
       if (this.role === "teacher") {
         return [
+          { key: "teacher_assets", icon: "资", name: "资产查询", desc: "只读查看资产", tone: "green" },
           { key: "courses", icon: "课", name: "课程管理", desc: "课程与任务", tone: "violet" },
           { key: "labs", icon: "室", name: "实验室", desc: "查看状态", tone: "blue" },
           { key: "reserve", icon: "约", name: "预约", desc: "提交申请", tone: "green" },
@@ -213,6 +219,7 @@ export default {
     const session = uni.getStorageSync("session") || {}
     this.username = session.username || ""
     this.role = session.role || ""
+    this.permissions = Array.isArray(session.permissions) ? session.permissions : []
     this.loadShortcutPrefs()
     if (this.isAdmin) {
       this.feedList = []
@@ -300,6 +307,9 @@ export default {
       if (this.role === "teacher" && !finalKeys.includes("courses")) {
         finalKeys = ["courses", ...finalKeys.filter((key) => key !== "courses")]
       }
+      if (this.role === "teacher" && !finalKeys.includes("teacher_assets")) {
+        finalKeys = ["courses", "teacher_assets", ...finalKeys.filter((key) => key !== "courses" && key !== "teacher_assets")].slice(0, this.maxShortcuts)
+      }
       this.shortcutKeys = this.normalizeShortcutKeys(finalKeys)
       this.editingShortcuts = false
       this.saveShortcutPrefs()
@@ -372,6 +382,7 @@ export default {
       if (key === "admin_audit") return this.goAdminAudit()
       if (key === "admin_stats") return this.goAdminStats()
       if (key === "courses") return this.goTeacherCourses()
+      if (key === "teacher_assets") return this.goTeacherAssets()
       if (key === "labs") return this.goLabs()
       if (key === "reserve") return this.goReserve()
       if (key === "agent") return this.goAgent()
@@ -402,6 +413,9 @@ export default {
     },
     goTeacherCourses() {
       uni.navigateTo({ url: "/pages/teacher/courses" })
+    },
+    goTeacherAssets() {
+      uni.navigateTo({ url: "/pages/teacher/assets" })
     },
     goLabs() {
       uni.navigateTo({ url: "/pages/labs/labs" })

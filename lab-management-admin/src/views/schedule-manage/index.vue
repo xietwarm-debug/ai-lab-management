@@ -4,7 +4,7 @@
       <div class="hero-copy">
         <span class="eyebrow">课表与门禁</span>
         <h2>排课管理</h2>
-        <p>统一处理学期课表导入、模板启用、开门提醒和实验室排课查询。</p>
+        <p>统一处理学期课表导入、模板启用、开门提醒和实验室排课查询，让教学安排与门禁联动更顺畅。</p>
         <div class="hero-meta">
           <span>当前模板：{{ activeTemplate?.termName || '未启用' }}</span>
           <span>今日待处理：{{ pendingCount }}</span>

@@ -2,7 +2,7 @@
   <div class="borrow-page">
     <section class="hero-card">
       <div class="hero-copy">
-        <span class="eyebrow">Borrow Workflow</span>
+        <span class="eyebrow">借用流程</span>
         <h2>资产借用审批</h2>
         <p>集中处理借用审批、续借审批、扫码归还、提醒催还和赔偿登记，并支持二次确认策略提醒。</p>
       </div>

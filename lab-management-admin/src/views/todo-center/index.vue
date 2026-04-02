@@ -808,6 +808,10 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
   flex-wrap: wrap;
   gap: 16px;
   padding: 16px 24px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 35%),
+    $card-bg;
+  border: 1px solid rgba(59, 130, 246, 0.08);
 
   .control-label, .switch-label { font-size: 14px; color: $text-regular; font-weight: 500; }
   
@@ -826,6 +830,13 @@ $shadow-hover: 0 15px 35px rgba(59, 130, 246, 0.06);
 
 /* --- 待办卡片内部 --- */
 .todo-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: $shadow-hover;
+  }
+
   .batch-bar {
     display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
     background: #f8fafc; padding: 8px 16px; border-radius: $radius-md;

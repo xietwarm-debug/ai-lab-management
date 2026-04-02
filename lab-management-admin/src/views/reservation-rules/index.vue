@@ -43,9 +43,9 @@
               </el-form-item>
               <el-form-item label="审批模式">
                 <el-radio-group v-model="form.global.approvalMode">
-                  <el-radio-button label="auto">自动通过</el-radio-button>
-                  <el-radio-button label="teacher">教师审批</el-radio-button>
-                  <el-radio-button label="admin">管理员审批</el-radio-button>
+                  <el-radio-button value="auto">自动通过</el-radio-button>
+                  <el-radio-button value="teacher">教师审批</el-radio-button>
+                  <el-radio-button value="admin">管理员审批</el-radio-button>
                 </el-radio-group>
               </el-form-item>
               <div class="switch-row">
@@ -98,9 +98,9 @@
                   </el-form-item>
                   <el-form-item label="审批模式">
                     <el-radio-group v-model="rule.approvalMode">
-                      <el-radio-button label="auto">自动通过</el-radio-button>
-                      <el-radio-button label="teacher">教师审批</el-radio-button>
-                      <el-radio-button label="admin">管理员审批</el-radio-button>
+                      <el-radio-button value="auto">自动通过</el-radio-button>
+                      <el-radio-button value="teacher">教师审批</el-radio-button>
+                      <el-radio-button value="admin">管理员审批</el-radio-button>
                     </el-radio-group>
                   </el-form-item>
                   <div class="switch-row">

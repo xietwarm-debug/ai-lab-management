@@ -1,4 +1,4 @@
-﻿from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import pymysql
@@ -160,11 +160,13 @@ AI_PERMISSION_CODE_SET = {
 }
 PERMISSION_DUTY_OPERATOR = "duty.operator"
 PERMISSION_ASSET_MANAGER = "asset.manager"
+PERMISSION_ASSET_READ_BASIC = "asset.read_basic"
 PERMISSION_SCHEDULE_MANAGER = "schedule.manager"
 PERMISSION_AUDIT_VIEWER = "audit.viewer"
 GENERAL_PERMISSION_CODE_SET = {
     PERMISSION_DUTY_OPERATOR,
     PERMISSION_ASSET_MANAGER,
+    PERMISSION_ASSET_READ_BASIC,
     PERMISSION_SCHEDULE_MANAGER,
     PERMISSION_AUDIT_VIEWER,
 }
@@ -720,6 +722,7 @@ def ensure_incident_record_table():
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     incident_no VARCHAR(32) NOT NULL DEFAULT '',
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     title VARCHAR(120) NOT NULL DEFAULT '',
                     incident_level VARCHAR(16) NOT NULL DEFAULT 'medium',
@@ -956,6 +959,34 @@ def ensure_agent_chat_message_table():
         conn.close()
 
 
+def ensure_agent_file_table():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_file (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    user_name VARCHAR(100) NOT NULL,
+                    original_name VARCHAR(255) NOT NULL,
+                    store_path VARCHAR(500) NOT NULL,
+                    file_ext VARCHAR(20) NOT NULL DEFAULT '',
+                    file_size INT NOT NULL DEFAULT 0,
+                    extracted_text LONGTEXT,
+                    in_knowledge TINYINT NOT NULL DEFAULT 0,
+                    knowledge_doc_id INT DEFAULT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    INDEX idx_agent_file_user (user_name),
+                    INDEX idx_agent_file_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def ensure_lost_found_claim_columns():
     conn = pymysql.connect(**DB)
     try:
@@ -991,6 +1022,65 @@ def ensure_lost_found_claim_columns():
         conn.close()
 
 
+
+def ensure_warehouse_tables():
+    conn = pymysql.connect(**DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS warehouse (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    name VARCHAR(128) NOT NULL,
+                    location VARCHAR(255) NOT NULL DEFAULT '',
+                    manager_id INT NULL,
+                    manager_name VARCHAR(128) NOT NULL DEFAULT '',
+                    status VARCHAR(32) NOT NULL DEFAULT 'active',
+                    description TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_status (status),
+                    INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                '''
+            )
+            cur.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS asset_transfer_record (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    asset_type VARCHAR(32) NOT NULL DEFAULT 'equipment',
+                    asset_id BIGINT NOT NULL,
+                    asset_code VARCHAR(64) NOT NULL DEFAULT '',
+                    asset_name VARCHAR(128) NOT NULL DEFAULT '',
+                    from_lab_id BIGINT NULL,
+                    from_lab_name VARCHAR(128) NOT NULL DEFAULT '',
+                    from_warehouse_id BIGINT NULL,
+                    from_warehouse_name VARCHAR(128) NOT NULL DEFAULT '',
+                    to_lab_id BIGINT NULL,
+                    to_lab_name VARCHAR(128) NOT NULL DEFAULT '',
+                    to_warehouse_id BIGINT NULL,
+                    to_warehouse_name VARCHAR(128) NOT NULL DEFAULT '',
+                    operator_id INT NULL,
+                    operator_name VARCHAR(128) NOT NULL DEFAULT '',
+                    transfer_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    reason VARCHAR(255) NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_asset_transfer_asset (asset_type, asset_id),
+                    INDEX idx_asset_transfer_date (transfer_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                '''
+            )
+            # Add columns to equipment if they don't exist
+            try:
+                cur.execute("ALTER TABLE equipment ADD COLUMN warehouse_id BIGINT NULL")
+                cur.execute("ALTER TABLE equipment ADD COLUMN warehouse_name VARCHAR(128) NOT NULL DEFAULT ''")
+            except Exception as e:
+                # Ignore duplicate column errors
+                pass
+        conn.commit()
+    finally:
+        conn.close()
+
 def ensure_assets_tables():
     conn = pymysql.connect(**DB)
     try:
@@ -1004,7 +1094,9 @@ def ensure_assets_tables():
                     model VARCHAR(128) NULL,
                     brand VARCHAR(128) NULL,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NULL,
+                    warehouse_name VARCHAR(128) NOT NULL DEFAULT '',
                     status VARCHAR(32) NOT NULL DEFAULT 'in_service',
                     keeper VARCHAR(128) NULL,
                     purchase_date DATE NULL,
@@ -1019,6 +1111,7 @@ def ensure_assets_tables():
                     expected_return_at DATETIME NULL,
                     last_returned_at DATETIME NULL,
                     last_transfer_from_lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     last_transfer_from_lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     last_transfer_at DATETIME NULL,
                     next_maintenance_at DATETIME NULL,
@@ -1070,6 +1163,7 @@ def ensure_assets_tables():
                     asset_code VARCHAR(64) NOT NULL DEFAULT '',
                     equipment_name VARCHAR(128) NOT NULL DEFAULT '',
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     issue_type VARCHAR(32) NOT NULL DEFAULT 'other',
                     description TEXT NOT NULL,
@@ -1109,6 +1203,7 @@ def ensure_assets_tables():
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     inventory_no VARCHAR(40) NOT NULL UNIQUE,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     status VARCHAR(16) NOT NULL DEFAULT 'open',
                     planned_count INT NOT NULL DEFAULT 0,
@@ -1137,8 +1232,10 @@ def ensure_assets_tables():
                     asset_code VARCHAR(64) NOT NULL DEFAULT '',
                     equipment_name VARCHAR(128) NOT NULL DEFAULT '',
                     expected_lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     expected_lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     scanned_lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     scanned_lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     scan_status VARCHAR(16) NOT NULL DEFAULT 'pending',
                     discrepancy_type VARCHAR(32) NOT NULL DEFAULT '',
@@ -1567,6 +1664,7 @@ def ensure_experiment_task_tables():
                     title VARCHAR(160) NOT NULL DEFAULT '',
                     description TEXT NULL,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     deadline DATETIME NULL,
                     teacher_id INT NULL,
                     teacher_user_name VARCHAR(64) NOT NULL DEFAULT '',
@@ -2383,6 +2481,7 @@ def ensure_course_schedule_items_table():
                     teacher_name VARCHAR(64) NOT NULL DEFAULT '',
                     class_name VARCHAR(160) NOT NULL DEFAULT '',
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     week_day INT NOT NULL DEFAULT 1,
                     period_start INT NOT NULL DEFAULT 1,
@@ -2503,6 +2602,7 @@ def ensure_door_open_reminders_table():
                     template_id BIGINT NOT NULL DEFAULT 0,
                     schedule_item_id BIGINT NOT NULL DEFAULT 0,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     course_name VARCHAR(160) NOT NULL DEFAULT '',
                     teacher_name VARCHAR(64) NOT NULL DEFAULT '',
@@ -2665,6 +2765,7 @@ def ensure_reservation_waitlist_tables():
                 CREATE TABLE IF NOT EXISTS reservation_waitlist (
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     user_name VARCHAR(64) NOT NULL DEFAULT '',
                     user_role VARCHAR(16) NOT NULL DEFAULT '',
@@ -2823,6 +2924,7 @@ def ensure_attendance_tables():
                     course_name VARCHAR(160) NOT NULL DEFAULT '',
                     teacher_user_name VARCHAR(64) NOT NULL DEFAULT '',
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     lab_name VARCHAR(128) NOT NULL DEFAULT '',
                     attendance_code VARCHAR(32) NOT NULL DEFAULT '',
                     code_expires_at DATETIME NULL,
@@ -3044,10 +3146,22 @@ def ensure_knowledge_base_tables():
                     hit_document_ids_json TEXT NULL,
                     hit_chunk_ids_json TEXT NULL,
                     latency_ms INT NOT NULL DEFAULT 0,
+                    matched_flag TINYINT(1) NOT NULL DEFAULT 1,
+                    miss_reason VARCHAR(32) NOT NULL DEFAULT '',
+                    source_scene VARCHAR(32) NOT NULL DEFAULT '',
+                    normalized_query VARCHAR(500) NOT NULL DEFAULT '',
+                    query_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    process_status VARCHAR(16) NULL DEFAULT NULL,
+                    resolved_document_id BIGINT NULL,
+                    resolved_by VARCHAR(64) NOT NULL DEFAULT '',
+                    resolved_at DATETIME NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_knowledge_query_user (username),
                     INDEX idx_knowledge_query_role (role),
-                    INDEX idx_knowledge_query_created_at (created_at)
+                    INDEX idx_knowledge_query_created_at (created_at),
+                    INDEX idx_knowledge_query_matched_flag (matched_flag),
+                    INDEX idx_knowledge_query_process_status (process_status),
+                    INDEX idx_knowledge_query_hash (query_hash)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
@@ -3066,6 +3180,63 @@ def ensure_knowledge_base_tables():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+
+            # Older deployments may already have these tables without the
+            # newer columns used by the admin feedback list query.
+            knowledge_query_columns = {
+                "user_id": "BIGINT NULL",
+                "username": "VARCHAR(64) NOT NULL DEFAULT ''",
+                "role": "VARCHAR(16) NOT NULL DEFAULT ''",
+                "query_text": "VARCHAR(500) NOT NULL DEFAULT ''",
+                "answer_text": "LONGTEXT NULL",
+                "matched_count": "INT NOT NULL DEFAULT 0",
+                "hit_document_ids_json": "TEXT NULL",
+                "hit_chunk_ids_json": "TEXT NULL",
+                "latency_ms": "INT NOT NULL DEFAULT 0",
+                "matched_flag": "TINYINT(1) NOT NULL DEFAULT 1",
+                "miss_reason": "VARCHAR(32) NOT NULL DEFAULT ''",
+                "source_scene": "VARCHAR(32) NOT NULL DEFAULT ''",
+                "normalized_query": "VARCHAR(500) NOT NULL DEFAULT ''",
+                "query_hash": "VARCHAR(64) NOT NULL DEFAULT ''",
+                "process_status": "VARCHAR(16) NULL DEFAULT NULL",
+                "resolved_document_id": "BIGINT NULL",
+                "resolved_by": "VARCHAR(64) NOT NULL DEFAULT ''",
+                "resolved_at": "DATETIME NULL",
+                "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            }
+            cur.execute(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA=%s AND TABLE_NAME='knowledge_query_log'
+                """,
+                (DB.get("database"),),
+            )
+            existing_query_columns = {str((row or {}).get("COLUMN_NAME") or "").strip().lower() for row in (cur.fetchall() or [])}
+            for column_name, ddl in knowledge_query_columns.items():
+                if column_name.lower() not in existing_query_columns:
+                    cur.execute(f"ALTER TABLE knowledge_query_log ADD COLUMN {column_name} {ddl}")
+
+            knowledge_feedback_columns = {
+                "query_log_id": "BIGINT NOT NULL",
+                "user_id": "BIGINT NULL",
+                "username": "VARCHAR(64) NOT NULL DEFAULT ''",
+                "helpful": "TINYINT(1) NOT NULL DEFAULT 1",
+                "comment": "VARCHAR(255) NOT NULL DEFAULT ''",
+                "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            }
+            cur.execute(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA=%s AND TABLE_NAME='knowledge_feedback'
+                """,
+                (DB.get("database"),),
+            )
+            existing_feedback_columns = {str((row or {}).get("COLUMN_NAME") or "").strip().lower() for row in (cur.fetchall() or [])}
+            for column_name, ddl in knowledge_feedback_columns.items():
+                if column_name.lower() not in existing_feedback_columns:
+                    cur.execute(f"ALTER TABLE knowledge_feedback ADD COLUMN {column_name} {ddl}")
         conn.commit()
     finally:
         conn.close()
@@ -3098,6 +3269,7 @@ def ensure_repair_ai_v2_tables():
                     work_order_id BIGINT NULL,
                     equipment_id BIGINT NULL,
                     lab_id BIGINT NULL,
+                    warehouse_id BIGINT NULL,
                     user_id BIGINT NULL,
                     input_text LONGTEXT NULL,
                     attachment_json LONGTEXT NULL,
@@ -3546,16 +3718,87 @@ def _call_siliconflow_grounded_knowledge_reply(query_text, hits):
     return str(content or "").strip()
 
 
-def ask_knowledge_base(query_text, current_role="", actor=None, limit=None):
+def _normalize_knowledge_query_text(query_text):
+    raw = str(query_text or "").strip().lower()
+    raw = re.sub(r"\s+", " ", raw)
+    return raw[:500]
+
+
+def _build_knowledge_query_hash(query_text):
+    normalized = _normalize_knowledge_query_text(query_text)
+    if not normalized:
+        return normalized, ""
+    return normalized, hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _log_knowledge_query(query_text, current_role="", actor=None, answer="", hits=None, latency_ms=0, matched=False, miss_reason="", source_scene=""):
+    actor = actor or getattr(g, "current_user", {}) or {}
+    hit_items = hits if isinstance(hits, list) else []
+    normalized_query, query_hash = _build_knowledge_query_hash(query_text)
+    return execute_insert(
+        """
+        INSERT INTO knowledge_query_log (
+            user_id, username, role, query_text, answer_text, matched_count,
+            hit_document_ids_json, hit_chunk_ids_json, latency_ms, matched_flag,
+            miss_reason, source_scene, normalized_query, query_hash, process_status,
+            created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            _to_int_or_none(actor.get("id")),
+            str(actor.get("username") or "").strip(),
+            str(current_role or actor.get("role") or "").strip(),
+            str(query_text or "").strip()[:500],
+            str(answer or ""),
+            len(hit_items),
+            _json_dumps_safe([int(item.get("documentId") or 0) for item in hit_items]),
+            _json_dumps_safe([int(item.get("id") or 0) for item in hit_items]),
+            int(latency_ms or 0),
+            1 if matched else 0,
+            str(miss_reason or "").strip()[:32],
+            str(source_scene or "").strip()[:32],
+            normalized_query,
+            query_hash,
+            None if matched else "pending",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+
+
+def ask_knowledge_base(query_text, current_role="", actor=None, limit=None, source_scene=""):
     actor = actor or getattr(g, "current_user", {}) or {}
     started_at = time.time()
     hits = search_knowledge_chunks(query_text, current_role=current_role, limit=limit)
+    latency_ms = int(round((time.time() - started_at) * 1000))
     if not hits:
-        return {"matched": False, "answer": "", "sources": [], "hits": [], "queryLogId": 0}
+        query_log_id = _log_knowledge_query(
+            query_text,
+            current_role=current_role,
+            actor=actor,
+            answer="",
+            hits=[],
+            latency_ms=latency_ms,
+            matched=False,
+            miss_reason="no_document",
+            source_scene=source_scene,
+        )
+        return {"matched": False, "answer": "", "sources": [], "hits": [], "queryLogId": int(query_log_id or 0), "missReason": "no_document"}
 
     top_score = float((hits[0] or {}).get("score") or 0)
     if top_score < 1.2:
-        return {"matched": False, "answer": "", "sources": [], "hits": [], "queryLogId": 0}
+        query_log_id = _log_knowledge_query(
+            query_text,
+            current_role=current_role,
+            actor=actor,
+            answer="",
+            hits=hits,
+            latency_ms=latency_ms,
+            matched=False,
+            miss_reason="low_score",
+            source_scene=source_scene,
+        )
+        return {"matched": False, "answer": "", "sources": [], "hits": [], "queryLogId": int(query_log_id or 0), "missReason": "low_score"}
 
     try:
         answer = _call_siliconflow_grounded_knowledge_reply(query_text, hits) if SILICONFLOW_API_KEY else ""
@@ -3565,26 +3808,16 @@ def ask_knowledge_base(query_text, current_role="", actor=None, limit=None):
         answer = _build_knowledge_fallback_reply(query_text, hits)
     sources = _build_knowledge_sources(hits)
     latency_ms = int(round((time.time() - started_at) * 1000))
-    query_log_id = execute_insert(
-        """
-        INSERT INTO knowledge_query_log (
-            user_id, username, role, query_text, answer_text, matched_count,
-            hit_document_ids_json, hit_chunk_ids_json, latency_ms, created_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            _to_int_or_none(actor.get("id")),
-            str(actor.get("username") or "").strip(),
-            str(current_role or actor.get("role") or "").strip(),
-            str(query_text or "").strip()[:500],
-            str(answer or ""),
-            len(hits),
-            _json_dumps_safe([int(item.get("documentId") or 0) for item in hits]),
-            _json_dumps_safe([int(item.get("id") or 0) for item in hits]),
-            latency_ms,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ),
+    query_log_id = _log_knowledge_query(
+        query_text,
+        current_role=current_role,
+        actor=actor,
+        answer=answer,
+        hits=hits,
+        latency_ms=latency_ms,
+        matched=True,
+        miss_reason="",
+        source_scene=source_scene,
     )
     return {
         "matched": True,
@@ -3968,6 +4201,291 @@ def list_equipment_failure_predictions(limit=8, horizon_days=30, auto_refresh=Tr
             }
         )
     return {"predictDate": predict_date, "horizonDays": target_horizon, "items": items}
+
+
+def _asset_basic_status_label(status):
+    key = str(status or "").strip().lower()
+    if key == "in_service":
+        return "在用"
+    if key == "repairing":
+        return "维修中"
+    if key == "scrapped":
+        return "已报废"
+    return key or "未知"
+
+
+def _serialize_basic_asset_row(row):
+    item = row or {}
+    return {
+        "id": int(item.get("id") or 0),
+        "assetCode": str(item.get("assetCode") or "").strip(),
+        "name": str(item.get("name") or "").strip(),
+        "model": str(item.get("model") or "").strip(),
+        "brand": str(item.get("brand") or "").strip(),
+        "labId": _to_int_or_none(item.get("labId")),
+        "labName": str(item.get("labName") or "").strip(),
+        "status": str(item.get("status") or "").strip(),
+        "statusLabel": _asset_basic_status_label(item.get("status")),
+        "allowBorrow": bool(int(item.get("allowBorrow") or 0)),
+        "isBorrowed": bool(int(item.get("isBorrowed") or 0)),
+        "borrowStatusText": "已借出" if bool(int(item.get("isBorrowed") or 0)) else "在库",
+        "nextMaintenanceAt": _to_text_time(item.get("nextMaintenanceAt")),
+        "warrantyUntil": _to_text_time(item.get("warrantyUntil")),
+        "locationNote": str(item.get("locationNote") or "").strip(),
+        "purchaseDate": _to_text_time(item.get("purchaseDate")),
+        "updatedAt": _to_text_time(item.get("updatedAt")),
+    }
+
+
+def find_basic_asset_by_code(asset_code):
+    code = str(asset_code or "").strip().upper()
+    if not code:
+        return None
+    rows = query(
+        """
+        SELECT id,
+               asset_code AS assetCode,
+               name,
+               model,
+               brand,
+               lab_id AS labId,
+               lab_name AS labName,
+               status,
+               allow_borrow AS allowBorrow,
+               is_borrowed AS isBorrowed,
+               next_maintenance_at AS nextMaintenanceAt,
+               warranty_until AS warrantyUntil,
+               location_note AS locationNote,
+               purchase_date AS purchaseDate,
+               updated_at AS updatedAt
+        FROM equipment
+        WHERE UPPER(asset_code)=%s
+        LIMIT 1
+        """,
+        (code,),
+    )
+    if not rows:
+        return None
+    return _serialize_basic_asset_row(rows[0])
+
+
+def list_basic_asset_records(
+    keyword="",
+    lab_name="",
+    status="",
+    is_borrowed=None,
+    maintenance_due_days=None,
+    warranty_due_days=None,
+    page=1,
+    page_size=20,
+):
+    keyword_text = str(keyword or "").strip()
+    lab_name_text = str(lab_name or "").strip()
+    status_text = str(status or "").strip().lower()
+    page_num = max(1, int(page or 1))
+    size_num = max(1, min(int(page_size or 20), 100))
+    offset = (page_num - 1) * size_num
+    now_dt = datetime.now()
+
+    where_sql = " WHERE 1=1"
+    params = []
+    if keyword_text:
+        where_sql += """
+            AND (
+                asset_code LIKE %s
+                OR name LIKE %s
+                OR model LIKE %s
+                OR brand LIKE %s
+                OR lab_name LIKE %s
+                OR location_note LIKE %s
+            )
+        """
+        kw = f"%{keyword_text}%"
+        params.extend([kw, kw, kw, kw, kw, kw])
+    if lab_name_text:
+        where_sql += " AND lab_name LIKE %s"
+        params.append(f"%{lab_name_text}%")
+    if status_text:
+        where_sql += " AND status=%s"
+        params.append(status_text)
+    if is_borrowed is not None:
+        where_sql += " AND is_borrowed=%s"
+        params.append(1 if bool(is_borrowed) else 0)
+    if maintenance_due_days is not None:
+        deadline = now_dt + timedelta(days=max(0, int(maintenance_due_days)))
+        where_sql += " AND next_maintenance_at IS NOT NULL AND next_maintenance_at<=%s"
+        params.append(deadline.strftime("%Y-%m-%d %H:%M:%S"))
+    if warranty_due_days is not None:
+        deadline = (now_dt + timedelta(days=max(0, int(warranty_due_days)))).strftime("%Y-%m-%d")
+        where_sql += " AND warranty_until IS NOT NULL AND warranty_until<=%s"
+        params.append(deadline)
+
+    total_rows = query("SELECT COUNT(*) AS cnt FROM equipment" + where_sql, tuple(params))
+    total = int((total_rows[0] or {}).get("cnt") or 0) if total_rows else 0
+    rows = query(
+        """
+        SELECT id,
+               asset_code AS assetCode,
+               name,
+               model,
+               brand,
+               lab_id AS labId,
+               lab_name AS labName,
+               status,
+               allow_borrow AS allowBorrow,
+               is_borrowed AS isBorrowed,
+               next_maintenance_at AS nextMaintenanceAt,
+               warranty_until AS warrantyUntil,
+               location_note AS locationNote,
+               purchase_date AS purchaseDate,
+               updated_at AS updatedAt
+        FROM equipment
+        """
+        + where_sql
+        + """
+        ORDER BY id DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(list(params) + [size_num, offset]),
+    )
+    return {
+        "items": [_serialize_basic_asset_row(row) for row in (rows or [])],
+        "meta": {"page": page_num, "pageSize": size_num, "total": total},
+    }
+
+
+def answer_asset_basic_question(question, current_user, limit=5):
+    actor = current_user or {}
+    raw = str(question or "").strip()
+    compact = re.sub(r"\s+", "", raw)
+    if not compact:
+        return {"matched": False}
+
+    asset_code_match = re.search(r"\b([A-Z]\d{3}-[A-Z0-9]+-\d{3,4})\b", raw.upper())
+    asset_code = str(asset_code_match.group(1) or "").strip().upper() if asset_code_match else ""
+    lab_name = _extract_lab_name_from_text(raw)
+    wants_count = any(token in compact for token in ("多少", "几台", "几个", "几条"))
+    wants_risk = any(token in compact for token in ("高风险", "风险较高", "故障风险", "风险设备"))
+    mentions_asset = bool(asset_code) or any(
+        token in compact for token in ("资产", "设备", "借出", "借用中", "维修中", "报废", "维保", "质保", "到期")
+    )
+    if not mentions_asset:
+        return {"matched": False}
+
+    if not can_access_basic_asset_data(actor):
+        return {
+            "matched": True,
+            "answer": "当前账号还没有开通资产只读权限，请联系管理员授权后再查询资产数据。",
+            "intent": "asset_permission_required",
+            "sources": [],
+        }
+
+    jump_url = "/pages/admin/equipments" if str(actor.get("role") or "").strip().lower() == "admin" else "/pages/teacher/assets"
+    sources = [{"title": "资产只读视图", "url": jump_url}]
+
+    if wants_risk:
+        prediction_payload = list_equipment_failure_predictions(limit=12, horizon_days=30, auto_refresh=True)
+        rows = prediction_payload.get("items") if isinstance(prediction_payload.get("items"), list) else []
+        if asset_code:
+            rows = [row for row in rows if str(row.get("assetCode") or "").strip().upper() == asset_code]
+        if lab_name:
+            rows = [row for row in rows if lab_name in str(row.get("labName") or "").strip()]
+        rows = rows[: max(1, min(int(limit or 5), 8))]
+        if not rows:
+            prefix = f"{lab_name} " if lab_name else ""
+            return {"matched": True, "answer": f"{prefix}当前没有匹配到高风险设备。", "intent": "asset_risk", "sources": sources}
+        if wants_count:
+            return {
+                "matched": True,
+                "answer": f"当前匹配到 {len(rows)} 台高风险设备，最高风险为 {rows[0].get('assetCode') or '-'}，风险分 {int(float(rows[0].get('riskScore') or 0))}。",
+                "intent": "asset_risk",
+                "sources": sources,
+            }
+        lines = []
+        for idx, row in enumerate(rows, start=1):
+            lines.append(
+                f"{idx}. {str(row.get('assetCode') or '-').strip()} {str(row.get('name') or '-').strip()}，"
+                f"{str(row.get('labName') or '-').strip()}，风险分 {int(float(row.get('riskScore') or 0))}，"
+                f"建议：{str(row.get('recommendation') or '尽快排查').strip()}"
+            )
+        return {"matched": True, "answer": "当前优先关注的高风险设备如下：\n" + "\n".join(lines), "intent": "asset_risk", "sources": sources}
+
+    status = ""
+    if "维修中" in compact or ("维修" in compact and "设备" in compact):
+        status = "repairing"
+    elif "报废" in compact:
+        status = "scrapped"
+    elif "在用" in compact:
+        status = "in_service"
+
+    is_borrowed = None
+    if any(token in compact for token in ("借出", "借用中", "已借出", "已借")):
+        is_borrowed = True
+    elif any(token in compact for token in ("在库", "未借", "未借出")):
+        is_borrowed = False
+
+    maintenance_due_days = 30 if any(token in compact for token in ("维保到期", "30天内维保", "近期维保", "维保提醒")) else None
+    warranty_due_days = 30 if any(token in compact for token in ("质保到期", "30天内质保", "近期质保")) else None
+
+    if asset_code:
+        row = find_basic_asset_by_code(asset_code)
+        if not row:
+            return {"matched": True, "answer": f"没有找到资产编号为 {asset_code} 的设备。", "intent": "asset_lookup", "sources": sources}
+        answer = (
+            f"{row.get('assetCode') or '-'} 当前状态为{row.get('statusLabel') or '未知'}，"
+            f"位于 {row.get('labName') or '-'}，"
+            f"借用状态为{row.get('borrowStatusText') or '-'}，"
+            f"下次维保 {row.get('nextMaintenanceAt') or '未设置'}，"
+            f"质保到期 {row.get('warrantyUntil') or '未设置'}。"
+        )
+        return {"matched": True, "answer": answer, "intent": "asset_lookup", "sources": sources}
+
+    result = list_basic_asset_records(
+        keyword="",
+        lab_name=lab_name,
+        status=status,
+        is_borrowed=is_borrowed,
+        maintenance_due_days=maintenance_due_days,
+        warranty_due_days=warranty_due_days,
+        page=1,
+        page_size=max(1, min(int(limit or 5), 10)),
+    )
+    items = result.get("items") if isinstance(result.get("items"), list) else []
+    total = int(((result.get("meta") or {}).get("total")) or 0)
+    if total <= 0:
+        prefix = f"{lab_name} " if lab_name else ""
+        return {"matched": True, "answer": f"{prefix}当前没有匹配到资产数据。", "intent": "asset_lookup", "sources": sources}
+
+    if wants_count:
+        bits = []
+        if lab_name:
+            bits.append(lab_name)
+        if status == "repairing":
+            bits.append("维修中设备")
+        elif status == "scrapped":
+            bits.append("已报废设备")
+        elif is_borrowed is True:
+            bits.append("借出中资产")
+        elif maintenance_due_days is not None:
+            bits.append("30天内维保到期设备")
+        elif warranty_due_days is not None:
+            bits.append("30天内质保到期设备")
+        else:
+            bits.append("资产")
+        return {"matched": True, "answer": f"{''.join(bits)}共有 {total} 条。", "intent": "asset_summary", "sources": sources}
+
+    preview_lines = []
+    for idx, row in enumerate(items[:5], start=1):
+        preview_lines.append(
+            f"{idx}. {row.get('assetCode') or '-'} {row.get('name') or '-'}，"
+            f"{row.get('labName') or '-'}，{row.get('statusLabel') or '-'}，{row.get('borrowStatusText') or '-'}"
+        )
+    return {
+        "matched": True,
+        "answer": f"当前匹配到 {total} 条资产记录。\n" + "\n".join(preview_lines),
+        "intent": "asset_summary",
+        "sources": sources,
+    }
 
 
 def _normalize_course_task_reminder_before_hours(raw_value, default_value=24):
@@ -5749,6 +6267,14 @@ def list_effective_user_permissions(current_user):
         if has_user_permission(actor, code):
             items.append(code)
     return items
+
+
+def can_access_basic_asset_data(current_user):
+    actor = current_user or {}
+    role = str(actor.get("role") or "").strip().lower()
+    if role == "admin":
+        return True
+    return has_user_permission(actor, PERMISSION_ASSET_READ_BASIC)
 
 
 def _normalize_notification_type(value):
@@ -10568,7 +11094,12 @@ def _agent_general_response(text, current_role=""):
     knowledge_result = None
     if not _agent_should_use_web_search(text):
         try:
-            knowledge_result = ask_knowledge_base(text, current_role=current_role, actor=getattr(g, "current_user", {}) or {})
+            knowledge_result = ask_knowledge_base(
+                text,
+                current_role=current_role,
+                actor=getattr(g, "current_user", {}) or {},
+                source_scene="agent",
+            )
         except Exception:
             knowledge_result = None
         if isinstance(knowledge_result, dict) and knowledge_result.get("matched") and knowledge_result.get("answer"):
@@ -11197,6 +11728,15 @@ def _agent_translate_intent(text, pending_ctx, fallback_date_text="", period_tim
             if not result["labName"]:
                 result["labName"] = str(_agent_pending_slot(pending_ctx, "labName", "") or "").strip()
             return result
+    if pending_intent == "lab_reservation_list":
+        has_followup_info = bool(result["date"] or result["time"] or result["labName"])
+        if has_followup_info:
+            result["op"] = "lab_reservation_list"
+            result["date"] = result["date"] or str(_agent_pending_slot(pending_ctx, "date", "") or "").strip()
+            result["time"] = result["time"] or str(_agent_pending_slot(pending_ctx, "time", "") or "").strip()
+            if not result["labName"]:
+                result["labName"] = str(_agent_pending_slot(pending_ctx, "labName", "") or "").strip()
+            return result
     if pending_intent == "repair_create":
         desc_text = str(result["description"] or "").strip()
         has_meaningful_desc = _agent_is_meaningful_repair_description(desc_text)
@@ -11483,6 +12023,11 @@ except Exception as e:
     print(f"[warn] ensure_lost_found_claim_columns failed: {e}")
 
 try:
+    ensure_warehouse_tables()
+except Exception as e:
+    print(f"[warn] ensure_warehouse_tables failed: {e}")
+
+try:
     ensure_assets_tables()
 except Exception as e:
     print(f"[warn] ensure_assets_tables failed: {e}")
@@ -11621,5 +12166,10 @@ try:
     ensure_ai_action_log_table()
 except Exception as e:
     print(f"[warn] ensure_ai_action_log_table failed: {e}")
+
+try:
+    ensure_agent_file_table()
+except Exception as e:
+    print(f"[warn] ensure_agent_file_table failed: {e}")
 
 
