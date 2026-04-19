@@ -81,6 +81,11 @@
         <view class="fieldError" v-if="errors.price">{{ errors.price }}</view>
 
         <view class="label">规格 JSON</view>
+        <view class="label">Asset Photo</view>
+        <input class="inputBase" v-model.trim="form.imageUrl" maxlength="500" placeholder="Image URL or /uploads/ path" />
+        <view class="fieldError" v-if="errors.imageUrl">{{ errors.imageUrl }}</view>
+        <image v-if="form.imageUrl" class="preview" :src="imgSrc(form.imageUrl)" mode="aspectFill" />
+
         <textarea
           class="textareaBase"
           v-model.trim="form.specJson"
@@ -208,8 +213,15 @@ export default {
         name: "",
         status: "",
         purchaseDate: "",
-        price: ""
+        price: "",
+        imageUrl: ""
       }
+    },
+    imgSrc(url) {
+      const raw = String(url || "").trim()
+      if (!raw) return ""
+      if (/^https?:\/\//i.test(raw)) return raw
+      return raw
     },
     validate() {
       this.clearErrors()
@@ -242,6 +254,11 @@ export default {
           this.errors.price = "价格格式不正确"
           ok = false
         }
+      }
+      const imageUrl = String(this.form.imageUrl || "").trim()
+      if (imageUrl && !/^(https?:\/\/|\/uploads\/)/.test(imageUrl)) {
+        this.errors.imageUrl = "图片地址需为 http(s) 链接或 /uploads/ 路径"
+        ok = false
       }
       return ok
     },
@@ -400,6 +417,14 @@ export default {
   box-sizing: border-box;
   display: flex;
   align-items: center;
+}
+
+.preview {
+  margin-top: 10px;
+  width: 100%;
+  height: 180px;
+  border-radius: 12px;
+  background: #e2e8f0;
 }
 
 .summaryCard {

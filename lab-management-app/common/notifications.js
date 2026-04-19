@@ -1,7 +1,7 @@
 import { BASE_URL, getApiListData, readStorageCache, requestWithRetry, writeStorageCache } from "@/common/api.js"
 
 const NOTICE_TAB_INDEX = 0
-const NOTIFICATION_TYPES = ["reservation", "repair", "sensor_alarm", "lostfound", "course_task", "asset_borrow"]
+const NOTIFICATION_TYPES = ["reservation", "repair", "sensor_alarm", "lostfound", "course_task", "asset_borrow", "attendance"]
 const NOTIFICATION_LIST_CACHE_PREFIX = "notifications.list."
 const DEFAULT_NOTIFICATION_CACHE_MAX_AGE_MS = 60 * 1000
 const NOTIFICATION_READ_STORAGE_KEYS = {
@@ -10,7 +10,8 @@ const NOTIFICATION_READ_STORAGE_KEYS = {
   sensor_alarm: "notifications_last_read_sensor_alarm_",
   lostfound: "notifications_last_read_lostfound_",
   course_task: "notifications_last_read_course_task_",
-  asset_borrow: "notifications_last_read_asset_borrow_"
+  asset_borrow: "notifications_last_read_asset_borrow_",
+  attendance: "notifications_last_read_attendance_"
 }
 
 function safeInvokeUni(apiFn, options) {
@@ -40,7 +41,8 @@ export function normalizeNotificationReadState(raw, fallback = {}) {
     sensor_alarm: String((fallback && fallback.sensor_alarm) || "").trim(),
     lostfound: String((fallback && fallback.lostfound) || "").trim(),
     course_task: String((fallback && fallback.course_task) || "").trim(),
-    asset_borrow: String((fallback && fallback.asset_borrow) || "").trim()
+    asset_borrow: String((fallback && fallback.asset_borrow) || "").trim(),
+    attendance: String((fallback && fallback.attendance) || "").trim()
   }
 
   if (!raw || typeof raw !== "object") return state

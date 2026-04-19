@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="container homePage">
     <view class="stack">
       <view class="card heroCard">
@@ -145,7 +145,8 @@ export default {
       lastReadRepair: "",
       lastReadAlarm: "",
       lastReadLostfound: "",
-      lastReadCourseTask: ""
+      lastReadCourseTask: "",
+      lastReadAttendance: ""
     }
   },
   computed: {
@@ -235,7 +236,7 @@ export default {
           name: "课堂签到",
           desc: "查看开放签到并完成打卡",
           tone: "amber",
-          badge: 0
+          badge: this.allNotifications.filter(x => x.type === "attendance" && this.isUnread(x)).length
         },
         {
           key: "notifications",
@@ -275,7 +276,8 @@ export default {
         repair: this.lastReadRepair,
         sensor_alarm: this.lastReadAlarm,
         lostfound: this.lastReadLostfound,
-        course_task: this.lastReadCourseTask
+        course_task: this.lastReadCourseTask,
+        attendance: this.lastReadAttendance
       }
     },
     bootstrap() {
@@ -303,6 +305,7 @@ export default {
       this.lastReadAlarm = normalized.sensor_alarm
       this.lastReadLostfound = normalized.lostfound
       this.lastReadCourseTask = normalized.course_task
+      this.lastReadAttendance = normalized.attendance
       this.persistReadStateToLocal()
     },
     async fetchReadState() {
@@ -382,7 +385,7 @@ export default {
     async markAllAsRead() {
       if (!this.user || this.unreadCount === 0) return
       const patch = {}
-      ;["reservation", "asset_borrow", "repair", "sensor_alarm", "lostfound", "course_task"].forEach((type) => {
+      ;["reservation", "asset_borrow", "repair", "sensor_alarm", "lostfound", "course_task", "attendance"].forEach((type) => {
         const latest = this.latestByType(type)
         if (latest) patch[type] = latest
       })
@@ -441,6 +444,7 @@ export default {
       if (type === "sensor_alarm") return "报警"
       if (type === "course_task") return "作业"
       if (type === "lostfound") return "失物"
+      if (type === "attendance") return "签到"
       return "预约"
     },
     statusTone(status) {
@@ -736,6 +740,11 @@ export default {
 .activityType.asset_borrow {
   background: #effff1;
   color: #166534;
+}
+
+.activityType.attendance {
+  background: #fff4dd;
+  color: #b45309;
 }
 
 .activityName {

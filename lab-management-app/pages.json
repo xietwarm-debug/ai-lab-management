@@ -79,7 +79,7 @@
     {
       "path": "pages/student/attendance",
       "style": {
-        "navigationBarTitleText": "Class Attendance"
+        "navigationBarTitleText": "课堂签到"
       }
     },
     {
@@ -140,7 +140,7 @@
     {
       "path": "pages/teacher/attendance",
       "style": {
-        "navigationBarTitleText": "Attendance Control"
+        "navigationBarTitleText": "课堂签到管理"
       }
     },
     {

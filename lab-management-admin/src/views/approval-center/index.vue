@@ -4,7 +4,7 @@
       <div class="hero-copy">
         <span class="eyebrow">Approval Hub</span>
         <h2>审批中心</h2>
-        <p>统一处理预约审批、借用审批和审批流配置，把日常审核工作集中到一个入口。</p>
+        <p>统一处理预约审批、借用审批、失物认领审批和审批流配置，把日常审核工作集中到一个入口。</p>
       </div>
       <div class="hero-actions">
         <el-button :loading="overviewLoading" @click="loadOverview">刷新概览</el-button>
@@ -51,6 +51,7 @@ import { hasPermission } from '@/utils/auth'
 import { useAuthStore } from '@/stores/auth'
 import { getReservationList } from '@/api/reservations'
 import { getBorrowRenewRequests, getBorrowRequests } from '@/api/borrow'
+import { getLostFoundList } from '@/api/lostfound'
 import { getReservationRules } from '@/api/rules'
 import {
   PERMISSION_ASSET_MANAGER,
@@ -58,6 +59,7 @@ import {
 } from '@/utils/constants'
 import ReservationsPage from '@/views/reservations/index.vue'
 import BorrowApprovalPage from '@/views/borrow-approval/index.vue'
+import LostFoundPage from '@/views/lostfound/index.vue'
 import ReservationRulesPage from '@/views/reservation-rules/index.vue'
 
 const route = useRoute()
@@ -68,6 +70,7 @@ const overviewLoading = ref(false)
 const reservationPending = ref(0)
 const borrowPending = ref(0)
 const renewPending = ref(0)
+const lostFoundPending = ref(0)
 const approvalMode = ref('-')
 const activeTab = ref('reservations')
 
@@ -78,6 +81,8 @@ const canViewBorrow = computed(() => {
 const canViewRules = computed(() => {
   return authStore.role === 'admin' || hasPermission(authStore.user, PERMISSION_SCHEDULE_MANAGER)
 })
+
+const canViewLostFound = computed(() => authStore.role === 'admin')
 
 const visibleTabs = computed(() => {
   const tabs = [
@@ -96,6 +101,14 @@ const visibleTabs = computed(() => {
     })
   }
 
+  if (canViewLostFound.value) {
+    tabs.push({
+      name: 'lostfound',
+      label: '失物认领审批',
+      component: LostFoundPage
+    })
+  }
+
   if (canViewRules.value) {
     tabs.push({
       name: 'rules',
@@ -109,19 +122,24 @@ const visibleTabs = computed(() => {
 
 const overviewCards = computed(() => [
   {
-    label: '待审批预约',
+    label: '待审预约',
     value: reservationPending.value,
     desc: '聚焦尚未处理的实验室预约申请。'
   },
   {
-    label: '待审批借用',
+    label: '待审借用',
     value: canViewBorrow.value ? borrowPending.value : '-',
     desc: canViewBorrow.value ? '集中处理设备借用和归还流转。' : '当前账号无借用审批权限。'
   },
   {
-    label: '待审批续借',
+    label: '待审续借',
     value: canViewBorrow.value ? renewPending.value : '-',
     desc: canViewBorrow.value ? '需要续借复核的申请会优先显示。' : '当前账号无续借审批权限。'
+  },
+  {
+    label: '待审失物认领',
+    value: canViewLostFound.value ? lostFoundPending.value : '-',
+    desc: canViewLostFound.value ? '统一处理找到物品的认领申请。' : '当前账号无失物认领审核权限。'
   },
   {
     label: '当前审批模式',
@@ -143,13 +161,15 @@ async function loadOverview() {
       getReservationList({ page: 1, pageSize: 1, status: 'pending' }),
       canViewBorrow.value ? getBorrowRequests({ page: 1, pageSize: 1, status: 'pending' }) : Promise.resolve(null),
       canViewBorrow.value ? getBorrowRenewRequests({ status: 'pending' }) : Promise.resolve(null),
+      canViewLostFound.value ? getLostFoundList({ claimApplyStatus: 'pending', type: 'found' }) : Promise.resolve(null),
       canViewRules.value ? getReservationRules() : Promise.resolve(null)
     ]
 
-    const [reservationResp, borrowResp, renewResp, rulesResp] = await Promise.all(requests)
+    const [reservationResp, borrowResp, renewResp, lostFoundResp, rulesResp] = await Promise.all(requests)
     reservationPending.value = Number(reservationResp?.data?.meta?.total || 0)
     borrowPending.value = Number(borrowResp?.data?.meta?.total || 0)
     renewPending.value = Array.isArray(renewResp?.data?.data) ? renewResp.data.data.length : 0
+    lostFoundPending.value = Array.isArray(lostFoundResp?.data) ? lostFoundResp.data.length : 0
 
     const mode = String(rulesResp?.data?.data?.global?.approval?.mode || '').trim()
     approvalMode.value = mode === 'teacher' ? '教师审批' : mode === 'auto' ? '自动通过' : mode === 'admin' ? '管理员审批' : '-'
@@ -257,7 +277,7 @@ loadOverview()
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 18px;
 }
 

@@ -995,7 +995,7 @@ def notifications():
     if not user:
         return jsonify({"ok": True, "data": [], "meta": {"count": 0, "role": role, "types": []}})
 
-    allowed_types = {"reservation", "lostfound", "repair", "sensor_alarm", "course_task", "asset_borrow"}
+    allowed_types = {"reservation", "lostfound", "repair", "sensor_alarm", "course_task", "asset_borrow", "attendance"}
     types = set()
     if type_filter:
         for part in type_filter.split(","):
@@ -1483,6 +1483,38 @@ def notifications():
                         "_sortAt": _to_datetime(created_at),
                     }
                 )
+
+
+    if "attendance" in types and role != "admin":
+        attendance_rows = query(
+            """
+            SELECT s.id,
+                   s.course_name AS courseName,
+                   s.start_at AS startAt,
+                   s.created_at AS createdAt
+            FROM attendance_session s
+            INNER JOIN course_member cm ON cm.course_id=s.course_id
+            WHERE cm.student_user_name=%s
+              AND cm.status='active'
+              AND s.status='open'
+            ORDER BY s.id DESC
+            LIMIT 20
+            """,
+            (user,)
+        )
+        for r in attendance_rows:
+            sort_raw = r.get("createdAt") or r.get("startAt")
+            notices.append(
+                {
+                    "id": f"attendance-{r.get('id')}",
+                    "type": "attendance",
+                    "labName": r.get("courseName") or "课堂",
+                    "status": "pending",
+                    "message": f"【考勤】{r.get('courseName') or '课堂'} 正在进行考勤，请尽快完成签到。",
+                    "createdAt": _to_text_time(sort_raw),
+                    "_sortAt": _to_datetime(sort_raw),
+                }
+            )
 
     notices.sort(key=lambda x: x.get("_sortAt", datetime.min), reverse=True)
     for n in notices:

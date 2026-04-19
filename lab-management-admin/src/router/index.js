@@ -163,12 +163,6 @@ const routes = [
         meta: { title: '\u5ba1\u6279\u6d41\u914d\u7f6e', roles: ['admin'], permissions: [PERMISSION_SCHEDULE_MANAGER] }
       },
       {
-        path: 'data-governance',
-        name: 'dataGovernance',
-        component: () => import('@/views/data-governance/index.vue'),
-        meta: { title: '导入治理', roles: ['admin'], permissions: [PERMISSION_ASSET_MANAGER, PERMISSION_SCHEDULE_MANAGER] }
-      },
-      {
         path: 'repairs',
         name: 'repairs',
         component: () => import('@/views/repairs/index.vue'),

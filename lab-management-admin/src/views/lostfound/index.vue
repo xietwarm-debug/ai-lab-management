@@ -316,6 +316,17 @@ function buildQuery() {
   }
 }
 
+function buildRouteQuery() {
+  const query = {
+    ...route.query,
+    ...buildQuery()
+  }
+  Object.keys(query).forEach((key) => {
+    if (query[key] === undefined || query[key] === '') delete query[key]
+  })
+  return query
+}
+
 async function fetchRows() {
   loading.value = true
   try {
@@ -335,14 +346,16 @@ function scrollToFocusedItem() {
 }
 
 async function applyFilters() {
-  await router.replace({ path: route.path, query: buildQuery() })
+  await router.replace({ path: route.path, query: buildRouteQuery() })
   await fetchRows()
 }
 
 async function resetFilters() {
   Object.keys(filters).forEach(k => filters[k] = '')
   focusId.value = 0
-  await router.replace({ path: route.path, query: {} })
+  const nextQuery = { ...route.query }
+  ;['keyword', 'status', 'type', 'claimApplyStatus', 'studentId', 'studentName', 'studentClass', 'focusId'].forEach((key) => delete nextQuery[key])
+  await router.replace({ path: route.path, query: nextQuery })
   await fetchRows()
 }
 

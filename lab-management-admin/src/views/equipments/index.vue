@@ -157,6 +157,7 @@
         <el-table-column label="操作" min-width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button link @click="openEditEquipment(row)">编辑</el-button>
             <el-button link @click="openTransferDialog(row)">调拨</el-button>
             <el-button link @click="openTransferHistory(row)">流转记录</el-button>
             <el-button link @click="openKeeperDialog(row)">责任人</el-button>
@@ -181,7 +182,7 @@
       </div>
     </section>
 
-    <el-dialog v-model="dialogVisible" title="采购入库" width="720px">
+    <el-dialog v-model="dialogVisible" :title="editEquipmentId ? '编辑资产' : '采购入库'" width="720px">
       <el-form label-position="top">
         <el-row :gutter="16">
           <el-col :span="12"><el-form-item label="资产编号"><el-input v-model="form.assetCode" /></el-form-item></el-col>
@@ -211,6 +212,7 @@
           <el-col :span="12"><el-form-item label="采购金额"><el-input v-model="form.price" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="允许借用"><el-switch v-model="form.allowBorrow" /></el-form-item></el-col>
           <el-col :span="24"><el-form-item label="规格 JSON"><el-input v-model="form.specJson" type="textarea" :rows="3" /></el-form-item></el-col>
+          <el-col :span="24"><el-form-item label="Asset Photo"><el-input v-model="form.imageUrl" placeholder="Image URL or uploaded file path" /></el-form-item></el-col>
         </el-row>
       </el-form>
       <template #footer>
@@ -412,6 +414,7 @@ const codeData = ref(null)
 const eventRows = ref([])
 const repairRows = ref([])
 const dialogVisible = ref(false)
+const editEquipmentId = ref(0)
 const maintenanceVisible = ref(false)
 const keeperVisible = ref(false)
 const scrapVisible = ref(false)
@@ -445,6 +448,7 @@ const form = reactive({
   purchaseDate: '',
   price: '',
   specJson: '',
+  imageUrl: '',
   allowBorrow: false
 })
 const maintenanceForm = reactive({
@@ -695,6 +699,7 @@ function handlePageSizeChange(size) {
 }
 
 function openCreateDialog() {
+  editEquipmentId.value = 0
   form.assetCode = ''
   form.name = ''
   form.locationType = 'lab'
@@ -708,7 +713,30 @@ function openCreateDialog() {
   form.purchaseDate = ''
   form.price = ''
   form.specJson = ''
+  form.imageUrl = ''
   form.allowBorrow = false
+  dialogVisible.value = true
+}
+
+async function openEditEquipment(row) {
+  const response = await getEquipmentDetail(row.id)
+  const current = response.data?.data || row
+  editEquipmentId.value = Number(current.id || 0)
+  form.assetCode = current.assetCode || ''
+  form.name = current.name || ''
+  form.locationType = current.warehouseId ? 'warehouse' : 'lab'
+  form.labId = current.labId || undefined
+  form.labName = current.labName || ''
+  form.warehouseId = current.warehouseId || undefined
+  form.warehouseName = current.warehouseName || ''
+  form.keeper = current.keeper || ''
+  form.brand = current.brand || ''
+  form.model = current.model || ''
+  form.purchaseDate = current.purchaseDate || ''
+  form.price = current.price != null ? String(current.price) : ''
+  form.specJson = current.specJson || ''
+  form.imageUrl = current.imageUrl || ''
+  form.allowBorrow = Boolean(current.allowBorrow)
   dialogVisible.value = true
 }
 
@@ -727,7 +755,7 @@ async function submitCreate() {
   }
   saving.value = true
   try {
-    await createEquipment({
+    const payload = {
       assetCode: form.assetCode.trim(),
       name: form.name.trim(),
       labId: form.locationType === 'lab' ? form.labId : null,
@@ -740,12 +768,18 @@ async function submitCreate() {
       purchaseDate: form.purchaseDate,
       price: form.price ? Number(form.price) : '',
       specJson: form.specJson.trim(),
-      imageUrl: '',
+      imageUrl: form.imageUrl.trim(),
       status: 'in_service',
       allowBorrow: form.allowBorrow
-    })
+    }
+    if (editEquipmentId.value) {
+      await updateEquipment(editEquipmentId.value, payload)
+    } else {
+      await createEquipment(payload)
+    }
     dialogVisible.value = false
-    ElMessage.success('采购入库完成')
+    ElMessage.success(editEquipmentId.value ? '资产已更新' : '采购入库完成')
+    editEquipmentId.value = 0
     await refreshAll()
   } finally {
     saving.value = false

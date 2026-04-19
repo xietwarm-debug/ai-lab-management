@@ -49,13 +49,6 @@ export const MENU_ITEMS = [
     roles: [ROLE_ADMIN]
   },
   {
-    key: 'lostFound',
-    label: '失物招领',
-    icon: 'Box',
-    path: '/lostfound',
-    roles: [ROLE_ADMIN]
-  },
-  {
     key: 'aiKnowledgeCenter',
     label: 'AI 知识助手',
     icon: 'ChatDotRound',
@@ -99,14 +92,6 @@ export const MENU_ITEMS = [
     path: '/warehouses',
     roles: [ROLE_ADMIN],
     permissions: [PERMISSION_ASSET_MANAGER]
-  },
-  {
-    key: 'dataGovernance',
-    label: '导入治理',
-    icon: 'UploadFilled',
-    path: '/data-governance',
-    roles: [ROLE_ADMIN],
-    permissions: [PERMISSION_ASSET_MANAGER, PERMISSION_SCHEDULE_MANAGER]
   },
   {
     key: 'repairs',

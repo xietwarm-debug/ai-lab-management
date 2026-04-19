@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="container notifyPage" :class="themeClass">
     <view class="stack">
       <view class="card heroCard">
@@ -17,6 +17,7 @@
           <view class="heroMetaItem">报警 {{ unreadAlarm }}</view>
           <view class="heroMetaItem">失物 {{ unreadLostfound }}</view>
           <view class="heroMetaItem">作业 {{ unreadCourseTask }}</view>
+          <view class="heroMetaItem">签到 {{ unreadAttendance }}</view>
         </view>
       </view>
 
@@ -44,6 +45,7 @@
             <text v-if="item.value === 'sensor_alarm' && unreadAlarm > 0">({{ unreadAlarm }})</text>
             <text v-if="item.value === 'lostfound' && unreadLostfound > 0">({{ unreadLostfound }})</text>
             <text v-if="item.value === 'course_task' && unreadCourseTask > 0">({{ unreadCourseTask }})</text>
+            <text v-if="item.value === 'attendance' && unreadAttendance > 0">({{ unreadAttendance }})</text>
           </view>
         </view>
 
@@ -136,6 +138,10 @@ function parseNoticeEntityId(notice) {
 
   const borrowRemindMatched = noticeId.match(/^borrow-remind-(\d+)-/)
   if (borrowRemindMatched) return toPositiveInt(borrowRemindMatched[1])
+
+  const attendanceMatched = noticeId.match(/^attendance-(\d+)$/)
+  if (attendanceMatched) return toPositiveInt(attendanceMatched[1])
+
   return 0
 }
 
@@ -152,6 +158,7 @@ export default {
       lastReadAlarm: "",
       lastReadLostfound: "",
       lastReadCourseTask: "",
+      lastReadAttendance: "",
       loading: false,
       typeOptions: [
         { label: "全部", value: "all" },
@@ -160,7 +167,8 @@ export default {
         { label: "报修", value: "repair" },
         { label: "报警", value: "sensor_alarm" },
         { label: "失物", value: "lostfound" },
-        { label: "作业", value: "course_task" }
+        { label: "作业", value: "course_task" },
+        { label: "签到", value: "attendance" }
       ]
     }
   },
@@ -190,6 +198,9 @@ export default {
     unreadCourseTask() {
       return this.sortedList.filter((n) => n.type === "course_task" && this.isUnread(n)).length
     },
+    unreadAttendance() {
+      return this.sortedList.filter((n) => n.type === "attendance" && this.isUnread(n)).length
+    },
     unreadTotal() {
       return (
         this.unreadReservation +
@@ -197,7 +208,8 @@ export default {
         this.unreadRepair +
         this.unreadAlarm +
         this.unreadLostfound +
-        this.unreadCourseTask
+        this.unreadCourseTask +
+        this.unreadAttendance
       )
     }
   },
@@ -226,7 +238,8 @@ export default {
         repair: this.lastReadRepair,
         sensor_alarm: this.lastReadAlarm,
         lostfound: this.lastReadLostfound,
-        course_task: this.lastReadCourseTask
+        course_task: this.lastReadCourseTask,
+        attendance: this.lastReadAttendance
       }
     },
     loadReadStateFromLocal() {
@@ -243,6 +256,7 @@ export default {
       this.lastReadAlarm = normalized.sensor_alarm
       this.lastReadLostfound = normalized.lostfound
       this.lastReadCourseTask = normalized.course_task
+      this.lastReadAttendance = normalized.attendance
       this.persistReadStateToLocal()
     },
     async fetchReadState() {
@@ -297,6 +311,10 @@ export default {
         if (!this.lastReadCourseTask) return true
         return (row.createdAt || "") > this.lastReadCourseTask
       }
+      if (row.type === "attendance") {
+        if (!this.lastReadAttendance) return true
+        return (row.createdAt || "") > this.lastReadAttendance
+      }
       return false
     },
     latestByType(type) {
@@ -307,7 +325,7 @@ export default {
       const patch = {}
       const collectTypes =
         this.typeFilter === "all"
-          ? ["reservation", "asset_borrow", "repair", "sensor_alarm", "lostfound", "course_task"]
+          ? ["reservation", "asset_borrow", "repair", "sensor_alarm", "lostfound", "course_task", "attendance"]
           : [this.typeFilter]
 
       collectTypes.forEach((type) => {
@@ -440,6 +458,11 @@ export default {
         }
       }
 
+      if (noticeType === "attendance") {
+        uni.navigateTo({ url: `/pages/student/attendance` })
+        return
+      }
+
       uni.showToast({ title: "暂无可跳转页面", icon: "none" })
     },
     typeText(type) {
@@ -448,6 +471,7 @@ export default {
       if (type === "sensor_alarm") return "报警"
       if (type === "lostfound") return "失物"
       if (type === "repair") return "报修"
+      if (type === "attendance") return "签到"
       return "预约"
     },
     statusTone(status) {
@@ -615,6 +639,11 @@ export default {
 .typeTag.course_task {
   background: #ecfeff;
   color: #0f766e;
+}
+
+.typeTag.attendance {
+  background: #fff4dd;
+  color: #b45309;
 }
 
 .typeTag.asset_borrow {

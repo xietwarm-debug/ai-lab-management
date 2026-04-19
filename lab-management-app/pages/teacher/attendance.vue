@@ -4,15 +4,15 @@
       <view class="card heroCard">
         <view class="rowBetween">
           <view>
-            <view class="title">Attendance Console</view>
-            <view class="subtitle">Create sessions, refresh codes, trigger rechecks, and review records</view>
+            <view class="title">考勤管理控制台</view>
+            <view class="subtitle">创建考勤、刷新签到码、发起二次核验及管理签到记录</view>
           </view>
-          <button class="btnSecondary miniBtn" size="mini" :loading="loading" @click="bootstrap">Refresh</button>
+          <button class="btnSecondary miniBtn" size="mini" :loading="loading" @click="bootstrap">刷新</button>
         </view>
       </view>
 
       <view class="card formCard">
-        <view class="cardTitle">Create Session</view>
+        <view class="cardTitle">发起课堂考勤</view>
         <picker mode="selector" :range="courseOptions" range-key="label" @change="onCourseChange">
           <view class="pickerField">{{ selectedCourseLabel }}</view>
         </picker>
@@ -20,52 +20,52 @@
           <view class="pickerField">{{ selectedLabLabel }}</view>
         </picker>
         <view class="grid2">
-          <input class="inputBase" v-model.number="form.durationMinutes" type="number" placeholder="Duration minutes" />
-          <input class="inputBase" v-model.number="form.geoRadiusMeter" type="number" placeholder="Geo radius meter" />
+          <input class="inputBase" v-model.number="form.durationMinutes" type="number" placeholder="考勤时长 (分钟)" />
+          <input class="inputBase" v-model.number="form.geoRadiusMeter" type="number" placeholder="地理围栏半径 (米)" />
         </view>
-        <input class="inputBase" v-model.trim="form.seatCodePrefix" maxlength="16" placeholder="Seat code prefix" />
-        <input class="inputBase" v-model.trim="form.allowedNetworkHint" maxlength="64" placeholder="Allowed network hint" />
-        <textarea class="textareaBase" v-model.trim="form.note" placeholder="Optional note" />
+        <input class="inputBase" v-model.trim="form.seatCodePrefix" maxlength="16" placeholder="座位号前缀 (可选)" />
+        <input class="inputBase" v-model.trim="form.allowedNetworkHint" maxlength="64" placeholder="网络提示 (可选)" />
+        <textarea class="textareaBase" v-model.trim="form.note" placeholder="备注信息 (可选)" />
         <view class="toggleRow">
-          <label><checkbox :checked="form.requireLocation" @click="form.requireLocation = !form.requireLocation" /> Location</label>
-          <label><checkbox :checked="form.requireDeviceBinding" @click="form.requireDeviceBinding = !form.requireDeviceBinding" /> Device binding</label>
-          <label><checkbox :checked="form.requireSeatCode" @click="form.requireSeatCode = !form.requireSeatCode" /> Seat code</label>
+          <label><checkbox :checked="form.requireLocation" @click="form.requireLocation = !form.requireLocation" /> 地理位置效验</label>
+          <label><checkbox :checked="form.requireDeviceBinding" @click="form.requireDeviceBinding = !form.requireDeviceBinding" /> 设备绑定防伪</label>
+          <label><checkbox :checked="form.requireSeatCode" @click="form.requireSeatCode = !form.requireSeatCode" /> 座位号验证</label>
         </view>
         <view class="actions">
-          <button class="btnPrimary miniBtn" size="mini" :loading="creating" @click="createSession">Start session</button>
+          <button class="btnPrimary miniBtn" size="mini" :loading="creating" @click="createSession">发起签到</button>
         </view>
       </view>
 
       <view class="card sessionCard" v-for="item in sessions" :key="item.id">
         <view class="rowBetween">
-          <view class="sessionTitle">{{ item.courseName || "Attendance session" }}</view>
+          <view class="sessionTitle">{{ item.courseName || "课堂考勤" }}</view>
           <view class="statusTag" :class="item.status === 'open' ? 'warning' : 'success'">
-            {{ item.status === "open" ? "Open" : "Closed" }}
+            {{ item.status === "open" ? "进行中" : "已结束" }}
           </view>
         </view>
-        <view class="meta">Lab: {{ item.labName || "Not assigned" }}</view>
-        <view class="meta">Code: {{ item.attendanceCode || "-" }} | Recheck: {{ item.recheckCode || "-" }}</view>
-        <view class="meta">Window: {{ item.startAt || "-" }} to {{ item.endAt || "-" }}</view>
+        <view class="meta">实验室: {{ item.labName || "未分配" }}</view>
+        <view class="meta">签到码: {{ item.attendanceCode || "-" }} | 核验码: {{ item.recheckCode || "-" }}</view>
+        <view class="meta">时间窗口: {{ item.startAt || "-" }} 至 {{ item.endAt || "-" }}</view>
         <view class="meta">
-          Summary: present {{ item.summary && item.summary.present || 0 }},
-          suspected {{ item.summary && item.summary.suspected || 0 }},
-          recheck pending {{ item.summary && item.summary.recheckPending || 0 }}
+          统计: 已到 {{ item.summary && item.summary.present || 0 }},
+          疑似异常 {{ item.summary && item.summary.suspected || 0 }},
+          待核验 {{ item.summary && item.summary.recheckPending || 0 }}
         </view>
 
         <view class="actions">
-          <button class="btnSecondary miniBtn" size="mini" @click="refreshCode(item)">Refresh code</button>
-          <button class="btnGhost miniBtn" size="mini" @click="startRecheck(item)">Start recheck</button>
+          <button class="btnSecondary miniBtn" size="mini" @click="refreshCode(item)">刷新签到码</button>
+          <button class="btnGhost miniBtn" size="mini" @click="startRecheck(item)">抽查核验</button>
           <button class="btnSecondary miniBtn" size="mini" @click="toggleDetail(item)">
-            {{ expandedId === item.id ? "Hide details" : "Show details" }}
+            {{ expandedId === item.id ? "收起详情" : "查看详情" }}
           </button>
           <button v-if="item.status === 'open'" class="btnDanger miniBtn" size="mini" @click="closeSession(item)">
-            Close
+            结束考勤
           </button>
         </view>
 
         <view class="detailBox" v-if="expandedId === item.id">
-          <view class="muted" v-if="detailLoading">Loading...</view>
-          <view class="emptyText muted" v-else-if="detailRecords.length === 0">No records yet</view>
+          <view class="muted" v-if="detailLoading">加载中...</view>
+          <view class="emptyText muted" v-else-if="detailRecords.length === 0">暂无签到记录</view>
           <view class="recordList" v-else>
             <view class="recordItem" v-for="record in detailRecords" :key="record.id">
               <view class="rowBetween">
@@ -74,16 +74,16 @@
                   class="statusTag"
                   :class="record.status === 'present' ? 'success' : record.status === 'suspected' ? 'warning' : 'danger'"
                 >
-                  {{ record.status || "-" }}
+                  {{ record.status === "present" ? "已到" : record.status === "suspected" ? "疑似异常" : "已驳回" }}
                 </view>
               </view>
-              <view class="meta">Seat: {{ record.seatCode || "-" }} | Distance: {{ record.distanceMeter || "-" }} m</view>
-              <view class="meta">Checked in at: {{ record.finalCheckinAt || "-" }}</view>
-              <view class="meta warning" v-if="record.suspicionReason">Risk: {{ record.suspicionReason }}</view>
+              <view class="meta">座位号: {{ record.seatCode || "-" }} | 位移偏差: {{ record.distanceMeter || "-" }} 米</view>
+              <view class="meta">打卡时间: {{ record.finalCheckinAt || "-" }}</view>
+              <view class="meta warning" v-if="record.suspicionReason">风险提示: {{ record.suspicionReason }}</view>
               <view class="actions">
-                <button class="btnPrimary miniBtn" size="mini" @click="resolveRecord(record, 'present')">Mark present</button>
-                <button class="btnSecondary miniBtn" size="mini" @click="resolveRecord(record, 'suspected')">Keep suspect</button>
-                <button class="btnDanger miniBtn" size="mini" @click="resolveRecord(record, 'rejected')">Reject</button>
+                <button class="btnPrimary miniBtn" size="mini" @click="resolveRecord(record, 'present')">标为正常</button>
+                <button class="btnSecondary miniBtn" size="mini" @click="resolveRecord(record, 'suspected')">保留异常</button>
+                <button class="btnDanger miniBtn" size="mini" @click="resolveRecord(record, 'rejected')">驳回签到</button>
               </view>
             </view>
           </view>
@@ -137,24 +137,24 @@ export default {
   computed: {
     courseOptions() {
       const rows = Array.isArray(this.courses) ? this.courses : []
-      return rows.map((item) => ({ label: item.name || `Course #${item.id}`, value: Number(item.id || 0) }))
+      return rows.map((item) => ({ label: item.name || `课程 #${item.id}`, value: Number(item.id || 0) }))
     },
     labOptions() {
       const rows = Array.isArray(this.labs) ? this.labs : []
-      return [{ label: "No lab", value: 0 }].concat(
+      return [{ label: "无实验室", value: 0 }].concat(
         rows.map((item) => ({
-          label: item.labName || item.name || `Lab #${item.labId || item.id}`,
+          label: item.labName || item.name || `实验室 #${item.labId || item.id}`,
           value: Number(item.labId || item.id || 0)
         }))
       )
     },
     selectedCourseLabel() {
       const hit = this.courseOptions.find((item) => Number(item.value) === Number(this.form.courseId || 0))
-      return hit ? hit.label : "Select course"
+      return hit ? hit.label : "选择课程"
     },
     selectedLabLabel() {
       const hit = this.labOptions.find((item) => Number(item.value) === Number(this.form.labId || 0))
-      return hit ? hit.label : "No lab"
+      return hit ? hit.label : "未配置实验室"
     }
   },
   onLoad(options) {
@@ -163,7 +163,7 @@ export default {
   },
   onShow() {
     const session = requireRole(["teacher", "admin"], {
-      message: "Teachers or admins only",
+      message: "仅限教师和管理员访问",
       fallbackUrl: STUDENT_ATTENDANCE_PAGE_URL
     })
     if (!session) return
@@ -189,7 +189,7 @@ export default {
           this.form.courseId = Number(this.courses[0].id || 0)
         }
       } catch (e) {
-        uni.showToast({ title: "Load failed", icon: "none" })
+        uni.showToast({ title: "加载失败", icon: "none" })
       } finally {
         this.loading = false
       }
@@ -216,7 +216,7 @@ export default {
     },
     async createSession() {
       if (!this.form.courseId) {
-        uni.showToast({ title: "Select a course", icon: "none" })
+        uni.showToast({ title: "请选择一门课程", icon: "none" })
         return
       }
       this.creating = true
@@ -227,13 +227,13 @@ export default {
         })
         const payload = (res && res.data) || {}
         if (!payload.ok) {
-          uni.showToast({ title: payload.msg || "Create failed", icon: "none" })
+          uni.showToast({ title: payload.msg || "发起失败", icon: "none" })
           return
         }
-        uni.showToast({ title: "Session started", icon: "success" })
+        uni.showToast({ title: "考勤已发起", icon: "success" })
         await this.bootstrap()
       } catch (e) {
-        uni.showToast({ title: "Create failed", icon: "none" })
+        uni.showToast({ title: "发起操作失败", icon: "none" })
       } finally {
         this.creating = false
       }
@@ -242,30 +242,30 @@ export default {
       const res = await teacherRefreshAttendanceCode(item.id)
       const payload = (res && res.data) || {}
       if (!payload.ok) {
-        uni.showToast({ title: payload.msg || "Refresh failed", icon: "none" })
+        uni.showToast({ title: payload.msg || "刷新失败", icon: "none" })
         return
       }
-      uni.showToast({ title: "Code refreshed", icon: "success" })
+      uni.showToast({ title: "签到码已刷新", icon: "success" })
       await this.bootstrap()
     },
     async startRecheck(item) {
       const res = await teacherStartAttendanceRecheck(item.id, { ratio: 0.3, windowSeconds: 60 })
       const payload = (res && res.data) || {}
       if (!payload.ok) {
-        uni.showToast({ title: payload.msg || "Recheck failed", icon: "none" })
+        uni.showToast({ title: payload.msg || "抽查发起失败", icon: "none" })
         return
       }
-      uni.showToast({ title: "Recheck started", icon: "success" })
+      uni.showToast({ title: "已发起抽查核验", icon: "success" })
       await this.bootstrap()
     },
     async closeSession(item) {
       const res = await teacherCloseAttendanceSession(item.id)
       const payload = (res && res.data) || {}
       if (!payload.ok) {
-        uni.showToast({ title: payload.msg || "Close failed", icon: "none" })
+        uni.showToast({ title: payload.msg || "结束考勤失败", icon: "none" })
         return
       }
-      uni.showToast({ title: "Session closed", icon: "success" })
+      uni.showToast({ title: "该时段已结束", icon: "success" })
       this.expandedId = 0
       this.detailRecords = []
       await this.bootstrap()
@@ -293,10 +293,10 @@ export default {
       const res = await teacherResolveAttendanceRecord(record.id, { status })
       const payload = (res && res.data) || {}
       if (!payload.ok) {
-        uni.showToast({ title: payload.msg || "Update failed", icon: "none" })
+        uni.showToast({ title: payload.msg || "更新失败", icon: "none" })
         return
       }
-      uni.showToast({ title: "Updated", icon: "success" })
+      uni.showToast({ title: "状态已更新", icon: "success" })
       const expandedId = this.expandedId
       await this.bootstrap()
       if (!expandedId) return
