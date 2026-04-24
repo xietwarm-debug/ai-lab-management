@@ -254,7 +254,7 @@ DOCUMENTS = [
     },
 ]
 
-
+# 生成文档文件,写入磁盘
 def write_document_files() -> list[dict]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     docs = []
@@ -266,7 +266,7 @@ def write_document_files() -> list[dict]:
         docs.append(doc)
     return docs
 
-
+# 更新数据库
 def upsert_document(doc: dict) -> tuple[str, int]:
     existing_rows = query(
         "SELECT id FROM knowledge_document WHERE title=%s LIMIT 1",

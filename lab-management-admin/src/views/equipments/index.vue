@@ -212,7 +212,24 @@
           <el-col :span="12"><el-form-item label="采购金额"><el-input v-model="form.price" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="允许借用"><el-switch v-model="form.allowBorrow" /></el-form-item></el-col>
           <el-col :span="24"><el-form-item label="规格 JSON"><el-input v-model="form.specJson" type="textarea" :rows="3" /></el-form-item></el-col>
-          <el-col :span="24"><el-form-item label="Asset Photo"><el-input v-model="form.imageUrl" placeholder="Image URL or uploaded file path" /></el-form-item></el-col>
+          <el-col :span="24">
+            <el-form-item label="资产照片">
+              <el-input v-model="form.imageUrl" placeholder="填写图片 URL 地址或直接上传">
+                <template #append>
+                  <el-upload
+                    :show-file-list="false"
+                    :http-request="handleFormImageUpload"
+                    accept=".jpg,.jpeg,.png,.gif,.webp"
+                  >
+                    <el-button :loading="imageUploading">上传图片</el-button>
+                  </el-upload>
+                </template>
+              </el-input>
+              <div v-if="form.imageUrl" class="preview-wrap">
+                <img :src="resolveImageUrl(form.imageUrl)" alt="asset-preview" class="preview-image" />
+              </div>
+            </el-form-item>
+          </el-col>
         </el-row>
       </el-form>
       <template #footer>
@@ -394,9 +411,12 @@ import {
 import { getLabs } from '@/api/labs'
 import { getRepairOrders } from '@/api/repairs'
 import { getWarehouses, transferAssets, getAssetTransfers } from '@/api/warehouses'
+import { uploadImage } from '@/api/upload'
+import { buildApiUrl } from '@/utils/request'
 
 const loading = ref(false)
 const saving = ref(false)
+const imageUploading = ref(false)
 const maintenanceSaving = ref(false)
 const keeperSaving = ref(false)
 const scrapSaving = ref(false)
@@ -610,6 +630,12 @@ function payloadFromDetail(row, overrides = {}) {
   }
 }
 
+function resolveImageUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  return /^https?:\/\//i.test(raw) ? raw : buildApiUrl(raw)
+}
+
 function buildEquipmentQuery() {
   const params = {
     page: page.value,
@@ -716,6 +742,20 @@ function openCreateDialog() {
   form.imageUrl = ''
   form.allowBorrow = false
   dialogVisible.value = true
+}
+
+async function handleFormImageUpload(option) {
+  imageUploading.value = true
+  try {
+    const response = await uploadImage(option.file)
+    form.imageUrl = String(response.data?.data?.url || '')
+    ElMessage.success('图片上传成功')
+    option.onSuccess?.(response.data)
+  } catch (error) {
+    option.onError?.(error)
+  } finally {
+    imageUploading.value = false
+  }
 }
 
 async function openEditEquipment(row) {
@@ -1062,6 +1102,19 @@ onMounted(async () => {
   font-size: 13px;
 }
 .filter-tag { margin-right: 0; }
+.preview-wrap {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  background: #f8fafc;
+}
+.preview-image {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
 .timeline-list { margin-top: 16px; }
 @media (max-width: 960px) {
   .hero-card,

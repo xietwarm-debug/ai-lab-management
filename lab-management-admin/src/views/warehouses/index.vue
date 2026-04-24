@@ -162,7 +162,20 @@
           <el-switch v-model="assetForm.allowBorrow" />
         </el-form-item>
         <el-form-item label="资产照片">
-          <el-input v-model="assetForm.imageUrl" placeholder="图片 URL 或上传后的文件路径" />
+          <el-input v-model="assetForm.imageUrl" placeholder="填写图片 URL 地址或直接上传">
+            <template #append>
+              <el-upload
+                :show-file-list="false"
+                :http-request="handleAssetImageUpload"
+                accept=".jpg,.jpeg,.png,.gif,.webp"
+              >
+                <el-button :loading="assetImageUploading">上传图片</el-button>
+              </el-upload>
+            </template>
+          </el-input>
+          <div v-if="assetForm.imageUrl" class="preview-wrap">
+            <img :src="resolveImageUrl(assetForm.imageUrl)" alt="asset-preview" class="preview-image" />
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -178,11 +191,14 @@ import { computed, reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getEquipmentList, updateEquipment } from '@/api/equipments'
 import { getWarehouses, createWarehouse, updateWarehouse, deleteWarehouse } from '@/api/warehouses'
+import { uploadImage } from '@/api/upload'
+import { buildApiUrl } from '@/utils/request'
 
 const loading = ref(false)
 const submitting = ref(false)
 const assetLoading = ref(false)
 const assetSaving = ref(false)
+const assetImageUploading = ref(false)
 const warehouses = ref([])
 const warehouseAssets = ref([])
 const keyword = ref('')
@@ -244,6 +260,12 @@ function statusType(status) {
   if (status === 'repairing') return 'warning'
   if (status === 'scrapped') return 'danger'
   return 'success'
+}
+
+function resolveImageUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  return /^https?:\/\//i.test(raw) ? raw : buildApiUrl(raw)
 }
 
 function resetForm() {
@@ -326,6 +348,20 @@ function openAssetEdit(asset) {
     allowBorrow: Boolean(asset.allowBorrow)
   })
   assetDialogVisible.value = true
+}
+
+async function handleAssetImageUpload(option) {
+  assetImageUploading.value = true
+  try {
+    const response = await uploadImage(option.file)
+    assetForm.imageUrl = String(response.data?.data?.url || '')
+    ElMessage.success('图片上传成功')
+    option.onSuccess?.(response.data)
+  } catch (error) {
+    option.onError?.(error)
+  } finally {
+    assetImageUploading.value = false
+  }
 }
 
 async function submitAssetEdit() {
@@ -488,6 +524,21 @@ onMounted(() => {
 .desc {
   min-height: 44px;
   margin-top: 14px;
+}
+
+.preview-wrap {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  background: #f8fafc;
+}
+
+.preview-image {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
 }
 
 .card-actions {

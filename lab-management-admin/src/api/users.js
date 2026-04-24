@@ -12,6 +12,10 @@ export function createUser(payload) {
   return request.post('/users', payload)
 }
 
+export function updateUser(id, payload) {
+  return request.put(`/users/${id}`, payload)
+}
+
 export function batchGenerateStudents(payload) {
   return request.post('/users/batch-generate-students', payload)
 }

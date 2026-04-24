@@ -171,6 +171,22 @@ export default {
     if (this.labs.length > 0) this.fetchAiRecommendations()
   },
   methods: {
+    normalizeReservationError(payload) {
+      const rawMsg = String((payload && payload.msg) || "").trim()
+      const errorCode = String((payload && payload.errorCode) || "").trim().toLowerCase()
+      const msg = rawMsg.toLowerCase()
+
+      if (
+        errorCode === "conflict" ||
+        msg === "conflict" ||
+        msg.includes("reservation conflict") ||
+        msg.includes("已被预约") ||
+        msg.includes("被占用")
+      ) {
+        return "该时段已被预约"
+      }
+      return rawMsg || "提交失败"
+    },
     syncCurrentUser() {
       const s = uni.getStorageSync("session")
       const user = s && s.username ? s.username : ""
@@ -392,7 +408,7 @@ export default {
             },
             success: (res) => {
               if (!res.data || !res.data.ok) {
-                const msg = (res.data && res.data.msg) || "提交失败"
+                const msg = this.normalizeReservationError(res.data)
                 if (msg.includes("date")) this.errors.date = msg
                 else if (msg.includes("time")) this.errors.time = msg
                 else if (msg.includes("lab")) this.errors.labName = msg

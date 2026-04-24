@@ -87,6 +87,10 @@
           </el-col>
         </el-row>
       </el-form>
+      <div class="dialog-helper-row">
+        <el-button :loading="drafting" :disabled="!canGenerateDraft || saving" @click="generateDraft">AI 润色</el-button>
+        <span class="dialog-helper-text">先填写标题和正文摘要，再用 AI 润色成可发布公告</span>
+      </div>
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -156,6 +160,7 @@ const form = reactive({
   publishAt: '',
   isPinned: false
 })
+const canGenerateDraft = computed(() => Boolean(form.title.trim() && form.content.trim()))
 
 function resetForm() {
   form.id = 0
@@ -219,14 +224,23 @@ async function fetchRows() {
 }
 
 async function generateDraft() {
+  if (!dialogVisible.value) {
+    resetForm()
+    dialogVisible.value = true
+  }
+
+  const titleHint = form.title.trim()
+  const contentHint = form.content.trim()
+  if (!titleHint || !contentHint) {
+    ElMessage.warning('请先填写公告标题和大概内容，再调用 AI 生成')
+    return
+  }
+
   drafting.value = true
   try {
-    if (!dialogVisible.value) {
-      resetForm()
-    }
     const response = await createAnnouncementDraft({
-      titleHint: form.title || '实验室管理通知',
-      contentHint: form.content || '请根据实验室近期安排生成一则正式公告。',
+      titleHint,
+      contentHint,
       publishAt: form.publishAt,
       isPinned: form.isPinned
     })
@@ -353,6 +367,20 @@ onMounted(() => {
   line-height: 1.7;
 }
 
+.dialog-helper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.dialog-helper-text {
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -390,5 +418,14 @@ onMounted(() => {
   padding: 16px;
   border-radius: 16px;
   background: #f8fafc;
+}
+
+@media (max-width: 768px) {
+  .page-head,
+  .head-actions,
+  .dialog-helper-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

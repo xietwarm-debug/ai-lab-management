@@ -212,6 +212,13 @@ export async function adminGetUserPermissions(userId) {
   });
 }
 
+export async function adminGetUserAiPermissions(userId) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/ai-permissions`,
+    method: "GET"
+  });
+}
+
 export async function adminGrantUserPermission(userId, payload = {}) {
   return apiRequest({
     url: `/users/${encodeURIComponent(String(userId || ""))}/permissions/grant`,
@@ -221,9 +228,27 @@ export async function adminGrantUserPermission(userId, payload = {}) {
   });
 }
 
+export async function adminGrantUserAiPermission(userId, payload = {}) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/ai-permissions/grant`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
 export async function adminRevokeUserPermission(userId, payload = {}) {
   return apiRequest({
     url: `/users/${encodeURIComponent(String(userId || ""))}/permissions/revoke`,
+    method: "POST",
+    header: { "Content-Type": "application/json" },
+    data: payload
+  });
+}
+
+export async function adminRevokeUserAiPermission(userId, payload = {}) {
+  return apiRequest({
+    url: `/users/${encodeURIComponent(String(userId || ""))}/ai-permissions/revoke`,
     method: "POST",
     header: { "Content-Type": "application/json" },
     data: payload

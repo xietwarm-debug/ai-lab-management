@@ -48,6 +48,7 @@
                 <div>
                   <strong>{{ item.termName || `模板 #${item.id}` }}</strong>
                   <p>开学：{{ item.semesterStartDate || '-' }} · 周数：{{ item.semesterWeeks || '-' }} · 明细：{{ item.itemCount || 0 }}</p>
+                  <p>课程：{{ item.courseCount || 0 }} 门<span v-if="item.coursePreview?.length"> · {{ item.coursePreview.join(' / ') }}<template v-if="(item.courseCount || 0) > item.coursePreview.length"> 等</template></span></p>
                   <p>来源：{{ item.sourceType || '-' }} · 提前提醒：{{ item.reminderLeadMinutes || 20 }} 分钟</p>
                 </div>
                 <div class="tag-row">
@@ -212,9 +213,21 @@
         </div>
         <div v-for="row in weekOverviewRows" :key="row.key" class="overview-row">
           <span class="overview-lab">{{ row.labName }}</span>
-          <span v-for="day in weekColumns" :key="`${row.key}-${day.weekDay}`" class="overview-cell">
-            {{ row.cells[day.weekDay].length ? row.cells[day.weekDay].map((item) => item.courseName).join(' / ') : '-' }}
-          </span>
+          <button
+            v-for="day in weekColumns"
+            :key="`${row.key}-${day.weekDay}`"
+            type="button"
+            class="overview-cell overview-cell--button"
+            :class="{ 'overview-cell--empty': !row.cells[day.weekDay].length, 'overview-cell--interactive': row.cells[day.weekDay].length }"
+            @click="openOverviewCell(row, day)"
+          >
+            <template v-if="row.cells[day.weekDay].length">
+              <strong>{{ row.cells[day.weekDay].length }} 节</strong>
+              <small>{{ overviewPreviewText(row.cells[day.weekDay]) }}</small>
+              <small class="overview-hint">点击查看课程详情</small>
+            </template>
+            <template v-else>-</template>
+          </button>
         </div>
       </div>
     </section>
@@ -267,12 +280,65 @@
           />
         </el-form-item>
         <p class="hint-copy">当前解析预览：{{ parsedImportItems.length }} 条</p>
+        <p class="hint-copy">本次导入包含 {{ parsedImportCourseGroups.length }} 门课程<span v-if="parsedImportCourseGroups.length"> · {{ parsedImportCourseGroups.slice(0, 4).map(item => `${item.courseName}(${item.count})`).join(' / ') }}</span></p>
+        <div class="import-preview">
+          <div class="tag-row">
+            <el-tag type="success">有效 {{ parsedImportItems.length }}</el-tag>
+            <el-tag :type="parsedImportErrors.length ? 'danger' : 'info'">异常 {{ parsedImportErrors.length }}</el-tag>
+          </div>
+          <el-alert
+            v-if="parsedImportErrorText"
+            type="error"
+            show-icon
+            :closable="false"
+            :title="parsedImportErrorText"
+          />
+          <el-alert v-else-if="parsedImportErrors.length" type="warning" show-icon :closable="false">
+            <template #title>发现 {{ parsedImportErrors.length }} 条待修正记录，建议先修正后再导入。</template>
+            <div class="import-error-list">
+              <div v-for="item in parsedImportErrors.slice(0, 6)" :key="`${item.rowNo}-${item.reason}`">
+                第 {{ item.rowNo }} 行：{{ item.reason }}
+              </div>
+            </div>
+          </el-alert>
+          <el-table v-if="parsedImportItems.length" :data="parsedImportItems.slice(0, 8)" size="small" stripe>
+            <el-table-column prop="courseName" label="课程" min-width="160" />
+            <el-table-column prop="weekDay" label="星期" min-width="90" />
+            <el-table-column label="节次/时间段" min-width="180">
+              <template #default="{ row }">
+                {{ row.periodRange || row.timeRange || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="weekRange" label="周次" min-width="100" />
+            <el-table-column prop="labName" label="实验室" min-width="140" />
+            <el-table-column prop="teacherName" label="教师" min-width="120" />
+          </el-table>
+          <p v-if="parsedImportItems.length > 8" class="hint-copy">仅展示前 8 条预览，提交时会按全部有效数据导入。</p>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
         <el-button type="primary" :loading="importing" @click="submitImport">提交导入</el-button>
       </template>
     </el-drawer>
+    <el-dialog v-model="overviewDetailVisible" title="课程详情" width="640px">
+      <div class="overview-detail-head">
+        <strong>{{ overviewDetail.labName || '-' }}</strong>
+        <span>{{ overviewDetail.date || '-' }} · {{ overviewDetail.dayLabel || '-' }}</span>
+      </div>
+      <el-empty v-if="!overviewDetail.list.length" description="当天暂无课程" />
+      <div v-else class="template-list">
+        <article v-for="item in overviewDetail.list" :key="item.id || item.key" class="template-card">
+          <strong>{{ item.periodText || '-' }} · {{ item.courseName || '-' }}</strong>
+          <p>{{ item.teacherName || '-' }} · {{ item.className || '-' }}</p>
+          <p>{{ item.startAt || '-' }} ~ {{ item.endAt || '-' }}</p>
+        </article>
+      </div>
+      <template #footer>
+        <el-button @click="overviewDetailVisible = false">关闭</el-button>
+        <el-button type="primary" @click="openOverviewInSchedule">在实验室课表中打开</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -312,6 +378,14 @@ const recordPageSize = ref(20)
 const importVisible = ref(false)
 const editingTemplateId = ref(0)
 const importing = ref(false)
+const overviewDetailVisible = ref(false)
+const overviewDetail = reactive({
+  labId: 0,
+  labName: '',
+  date: '',
+  dayLabel: '',
+  list: []
+})
 const importForm = reactive({
   termName: '',
   semesterStartDate: '',
@@ -320,7 +394,7 @@ const importForm = reactive({
   sourceType: 'manual',
   activate: true,
   mode: 'replace',
-  inputType: 'json',
+  inputType: 'paste',
   rawText: ''
 })
 
@@ -341,7 +415,7 @@ const activeTemplate = computed(() => templates.value.find((item) => item.status
 const pendingCount = computed(() => todayList.value.filter((item) => item.doorStatus === 'pending').length)
 
 const weekColumns = computed(() => {
-  const base = mondayOf(labQuery.date || todayText())
+  const base = mondayOf(workweekAnchor(labQuery.date || todayText()))
   const labels = ['周一', '周二', '周三', '周四', '周五']
   return labels.map((label, index) => {
     const date = addDays(base, index)
@@ -364,6 +438,7 @@ const weekOverviewRows = computed(() => {
   labs.value.forEach((lab) => {
     map[lab.id] = {
       key: `lab-${lab.id}`,
+      labId: Number(lab.id || 0),
       labName: lab.name || `LAB-${lab.id}`,
       cells: { 1: [], 2: [], 3: [], 4: [], 5: [] }
     }
@@ -373,6 +448,7 @@ const weekOverviewRows = computed(() => {
     if (!map[labId]) {
       map[labId] = {
         key: `lab-${labId}-${index}`,
+        labId,
         labName: item.labName || `LAB-${labId}`,
         cells: { 1: [], 2: [], 3: [], 4: [], 5: [] }
       }
@@ -381,37 +457,224 @@ const weekOverviewRows = computed(() => {
       map[labId].cells[item.weekDay].push(item)
     }
   })
+  Object.values(map).forEach((row) => {
+    Object.keys(row.cells).forEach((weekDay) => {
+      row.cells[weekDay].sort((a, b) => {
+        const sa = Number(a.periodStart || 0)
+        const sb = Number(b.periodStart || 0)
+        if (sa !== sb) return sa - sb
+        return Number(a.periodEnd || 0) - Number(b.periodEnd || 0)
+      })
+    })
+  })
   return Object.values(map)
 })
 
-const parsedImportItems = computed(() => {
-  try {
-    return parseImportItems(importForm.inputType, importForm.rawText)
-  } catch (error) {
-    return []
-  }
+const parsedImportResult = computed(() => parseImportItems(importForm.inputType, importForm.rawText, labs.value))
+const parsedImportItems = computed(() => parsedImportResult.value.items)
+const parsedImportErrors = computed(() => parsedImportResult.value.errors)
+const parsedImportErrorText = computed(() => parsedImportResult.value.parseError)
+const parsedImportCourseGroups = computed(() => {
+  const map = new Map()
+  parsedImportItems.value.forEach((item) => {
+    const courseName = normalizeText(item.courseName) || '未命名课程'
+    const next = map.get(courseName) || { courseName, count: 0 }
+    next.count += 1
+    map.set(courseName, next)
+  })
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count
+    return a.courseName.localeCompare(b.courseName, 'zh-Hans-CN')
+  })
 })
 
+function formatDateText(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseDateText(dateText) {
+  const text = String(dateText || '').trim()
+  return text ? new Date(`${text}T00:00:00`) : new Date()
+}
+
 function todayText() {
-  return new Date().toISOString().slice(0, 10)
+  return formatDateText(new Date())
+}
+
+function workweekAnchor(dateText) {
+  const date = parseDateText(dateText || todayText())
+  if (date.getDay() === 0) {
+    date.setDate(date.getDate() + 1)
+  }
+  return formatDateText(date)
 }
 
 function mondayOf(dateText) {
-  const date = new Date(dateText || todayText())
+  const date = parseDateText(dateText || todayText())
   const day = date.getDay()
   const offset = day === 0 ? -6 : 1 - day
   date.setDate(date.getDate() + offset)
-  return date.toISOString().slice(0, 10)
+  return formatDateText(date)
 }
 
 function addDays(dateText, delta) {
-  const date = new Date(dateText)
+  const date = parseDateText(dateText)
   date.setDate(date.getDate() + Number(delta || 0))
-  return date.toISOString().slice(0, 10)
+  return formatDateText(date)
 }
 
 function weekdayText(day) {
   return ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'][Number(day) || 0] || '-'
+}
+
+function normalizeText(value) {
+  return String(value || '').trim()
+}
+
+function splitImportLine(line) {
+  if (line.includes('\t')) {
+    return line.split('\t').map((item) => normalizeText(item))
+  }
+  return line.split(/,|，/).map((item) => normalizeText(item))
+}
+
+function buildPasteImportItem(parts, rowNo) {
+  if (!Array.isArray(parts) || !parts.length) return { skip: true }
+  const values = parts.slice()
+  while (values.length < 9) values.push('')
+  const firstCell = normalizeText(values[0])
+  if (!firstCell || firstCell === '课程名' || firstCell === '课程名称') {
+    return { skip: true }
+  }
+  const originalLength = parts.length
+  let weekDay = ''
+  let periodRange = ''
+  let timeRange = ''
+  let weekRange = ''
+  let labName = ''
+  let teacherName = ''
+  let className = ''
+  let note = ''
+  if (originalLength >= 9) {
+    weekDay = values[1]
+    periodRange = values[2]
+    timeRange = values[3]
+    weekRange = values[4]
+    labName = values[5]
+    teacherName = values[6]
+    className = values[7]
+    note = values[8]
+  } else {
+    weekDay = values[1]
+    periodRange = values[2]
+    weekRange = values[3]
+    labName = values[4]
+    teacherName = values[5]
+    className = values[6]
+    note = values[7]
+  }
+  return {
+    skip: false,
+    item: {
+      rowNo,
+      courseName: firstCell,
+      weekDay,
+      periodRange,
+      timeRange,
+      weekRange,
+      labName,
+      teacherName,
+      className,
+      note,
+      weekType: 'all'
+    }
+  }
+}
+
+function findLabMatch(item, labRows = []) {
+  const labId = Number(item.labId || 0)
+  const labName = normalizeText(item.labName)
+  return labRows.find((lab) => {
+    if (labId > 0 && Number(lab.id || 0) === labId) return true
+    if (labName && normalizeText(lab.name) === labName) return true
+    return false
+  })
+}
+
+function validateImportItem(item, labRows = []) {
+  const reasons = []
+  if (!normalizeText(item.courseName)) reasons.push('缺少课程名')
+  if (!normalizeText(item.weekDay)) reasons.push('缺少星期')
+  if (!normalizeText(item.periodRange) && !normalizeText(item.timeRange)) reasons.push('缺少节次或时间段')
+  if (!normalizeText(item.weekRange)) reasons.push('缺少周次')
+  if (!normalizeText(item.labName) && Number(item.labId || 0) <= 0) {
+    reasons.push('缺少实验室')
+  } else if (Array.isArray(labRows) && labRows.length && !findLabMatch(item, labRows)) {
+    reasons.push('实验室未匹配到系统数据')
+  }
+  return reasons
+}
+
+function parseImportItems(inputType, rawText, labRows = []) {
+  const text = normalizeText(rawText)
+  if (!text) {
+    return { items: [], errors: [], parseError: '' }
+  }
+  if (inputType === 'json') {
+    try {
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) {
+        return { items: [], errors: [], parseError: 'JSON 必须是数组格式。' }
+      }
+      const items = []
+      const errors = []
+      parsed.forEach((item, index) => {
+        const rowNo = Number(item?.rowNo || index + 1)
+        const normalizedItem = { weekType: 'all', ...(item || {}), rowNo }
+        const reasons = validateImportItem(normalizedItem, labRows)
+        if (reasons.length) {
+          errors.push({ rowNo, reason: reasons.join('；') })
+          return
+        }
+        items.push(normalizedItem)
+      })
+      return { items, errors, parseError: '' }
+    } catch (error) {
+      return { items: [], errors: [], parseError: error?.message || 'JSON 解析失败，请检查格式。' }
+    }
+  }
+
+  const items = []
+  const errors = []
+  text
+    .split(/\r?\n/)
+    .map((line) => normalizeText(line))
+    .filter(Boolean)
+    .forEach((line, index) => {
+      const rowNo = index + 1
+      const built = buildPasteImportItem(splitImportLine(line), rowNo)
+      if (built.skip) return
+      const reasons = validateImportItem(built.item, labRows)
+      if (reasons.length) {
+        errors.push({ rowNo, reason: reasons.join('；') })
+        return
+      }
+      items.push(built.item)
+    })
+  return { items, errors, parseError: '' }
+}
+
+function overviewPreviewText(list = []) {
+  const names = list
+    .map((item) => normalizeText(item.courseName))
+    .filter(Boolean)
+    .slice(0, 2)
+  if (!names.length) return '-'
+  if (list.length > 2) return `${names.join(' / ')} 等`
+  return names.join(' / ')
 }
 
 function buildRecordParams() {
@@ -434,7 +697,7 @@ function resetImportForm() {
   importForm.sourceType = 'manual'
   importForm.activate = true
   importForm.mode = 'replace'
-  importForm.inputType = 'json'
+  importForm.inputType = 'paste'
   importForm.rawText = ''
 }
 
@@ -450,7 +713,7 @@ async function loadTodayReminders() {
 
 async function loadWeekOverview() {
   const response = await getDoorRemindersWeek({
-    date: mondayOf(labQuery.date || todayText())
+    date: mondayOf(workweekAnchor(labQuery.date || todayText()))
   })
   weekList.value = Array.isArray(response.data?.data?.list) ? response.data.data.list : []
 }
@@ -475,7 +738,7 @@ async function loadLabSchedule() {
     return
   }
   const response = await getLabScheduleWeek(labQuery.labId, {
-    date: labQuery.date
+    date: workweekAnchor(labQuery.date)
   })
   weekSchedule.value = Array.isArray(response.data?.data?.days) ? response.data.data.days : []
   daySchedule.value = []
@@ -490,10 +753,14 @@ async function loadReminderRecords() {
 async function reloadAll() {
   pageLoading.value = true
   try {
-    await Promise.all([loadTemplates(), loadTodayReminders(), loadLabs(), loadReminderRecords(), loadWeekOverview()])
+    await Promise.all([loadTemplates(), loadTodayReminders(), loadLabs(), loadReminderRecords()])
     if (!labQuery.date) {
       labQuery.date = String(route.query.date || todayText())
     }
+    if (!route.query.date) {
+      labQuery.date = workweekAnchor(labQuery.date)
+    }
+    await loadWeekOverview()
     await loadLabSchedule()
   } finally {
     pageLoading.value = false
@@ -546,34 +813,28 @@ async function openEditImport(item) {
   importVisible.value = true
 }
 
-function parseImportItems(inputType, rawText) {
-  const text = String(rawText || '').trim()
-  if (!text) return []
-  if (inputType === 'json') {
-    const parsed = JSON.parse(text)
-    return Array.isArray(parsed) ? parsed : []
-  }
+function openOverviewCell(row, day) {
+  const list = Array.isArray(row?.cells?.[day.weekDay]) ? row.cells[day.weekDay] : []
+  if (!list.length) return
+  overviewDetail.labId = Number(row.labId || 0)
+  overviewDetail.labName = row.labName || '-'
+  overviewDetail.date = day.date || ''
+  overviewDetail.dayLabel = day.label || weekdayText(day.weekDay)
+  overviewDetail.list = list.slice()
+  overviewDetailVisible.value = true
+}
 
-  return text
-    .split(/\r?\n/)
-    .map((line) => String(line || '').trim())
-    .filter(Boolean)
-    .map((line) => {
-      const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map((item) => String(item || '').trim())
-      while (parts.length < 9) parts.push('')
-      return {
-        courseName: parts[0],
-        weekDay: parts[1],
-        periodRange: parts[2],
-        timeRange: parts[3],
-        weekRange: parts[4],
-        labName: parts[5],
-        teacherName: parts[6],
-        className: parts[7],
-        note: parts[8],
-        weekType: 'all'
-      }
-    })
+async function openOverviewInSchedule() {
+  if (!overviewDetail.labId) {
+    overviewDetailVisible.value = false
+    return
+  }
+  labQuery.labId = overviewDetail.labId
+  labQuery.date = overviewDetail.date || todayText()
+  labQuery.mode = 'day'
+  activeTab.value = 'schedule'
+  overviewDetailVisible.value = false
+  await loadLabSchedule()
 }
 
 async function submitImport() {
@@ -581,7 +842,16 @@ async function submitImport() {
     ElMessage.warning('请选择开学日期')
     return
   }
-  const items = parsedImportItems.value
+  const result = parsedImportResult.value
+  if (result.parseError) {
+    ElMessage.error(result.parseError)
+    return
+  }
+  if (result.errors.length) {
+    ElMessage.warning(`发现 ${result.errors.length} 条异常数据，请先修正后再导入`)
+    return
+  }
+  const items = result.items
   if (!items.length) {
     ElMessage.warning('请先提供课表数据')
     return
@@ -602,7 +872,21 @@ async function submitImport() {
       items
     })
     const data = response.data?.data || {}
+    const backendErrors = Array.isArray(data.errors) ? data.errors : []
     ElMessage.success(`导入完成，成功写入 ${data.inserted || 0} 条`)
+    if (backendErrors.length) {
+      await ElMessageBox.alert(
+        backendErrors
+          .slice(0, 8)
+          .map((item) => `第 ${item.row || item.rowNo || '-'} 行：${item.reason || '格式异常'}`)
+          .join('<br/>'),
+        '部分记录未导入',
+        {
+          dangerouslyUseHTMLString: true,
+          type: 'warning'
+        }
+      )
+    }
     importVisible.value = false
     await reloadAll()
   } catch (error) {
@@ -626,6 +910,9 @@ function handleRecordPageSizeChange(size) {
 onMounted(() => {
   if (!labQuery.date) {
     labQuery.date = String(route.query.date || todayText())
+  }
+  if (!route.query.date) {
+    labQuery.date = workweekAnchor(labQuery.date)
   }
   reloadAll()
 })
@@ -742,6 +1029,14 @@ onMounted(() => {
   gap: 16px;
 }
 
+.import-preview,
+.import-error-list,
+.overview-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .template-head,
 .panel-head {
   display: flex;
@@ -779,7 +1074,8 @@ onMounted(() => {
   grid-template-columns: 180px repeat(5, minmax(140px, 1fr));
 }
 
-.overview-row span {
+.overview-row span,
+.overview-row button {
   padding: 12px;
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
@@ -787,7 +1083,8 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.overview-row--head span {
+.overview-row--head span,
+.overview-row--head button {
   background: #f8fafc;
   font-weight: 700;
 }
@@ -796,10 +1093,38 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  white-space: normal;
 }
 
 .overview-cell small {
   color: var(--app-muted);
+}
+
+.overview-cell--button {
+  appearance: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  align-items: flex-start;
+  justify-content: center;
+  cursor: default;
+}
+
+.overview-cell--interactive {
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.7), rgba(255, 255, 255, 0.96));
+}
+
+.overview-cell--interactive:hover {
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.95), rgba(239, 246, 255, 0.96));
+}
+
+.overview-cell--empty {
+  color: var(--app-muted);
+}
+
+.overview-hint {
+  color: #2563eb;
 }
 
 .drawer-grid {

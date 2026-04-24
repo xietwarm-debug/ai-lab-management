@@ -43,8 +43,22 @@
           <h3>日志列表</h3>
           <span>已加载 {{ rows.length }} / {{ total }} 条</span>
         </div>
+        <div class="table-tools">
+          <span class="selection-text">已选 {{ selectedCount }} 条</span>
+          <el-button :disabled="selectedCount === 0" @click="clearSelectedRows">清空已选</el-button>
+          <el-button :disabled="selectedCount === 0" @click="exportSelectedLogs">导出已选 CSV</el-button>
+          <el-button type="primary" :disabled="selectedCount === 0" @click="explainSelectedLogs">AI 解释已选日志</el-button>
+        </div>
       </div>
-      <el-table v-loading="loading" :data="rows" stripe>
+      <el-table
+        ref="tableRef"
+        v-loading="loading"
+        :data="rows"
+        row-key="id"
+        stripe
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="52" reserve-selection />
         <el-table-column prop="createdAt" label="时间" min-width="180" />
         <el-table-column prop="action" label="动作" min-width="220" />
         <el-table-column prop="operatorName" label="操作人" min-width="130" />
@@ -75,13 +89,18 @@
 
 <script setup>
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import { getAuditExportUrl, getAuditLogs } from '@/api/audit'
 
+const AUDIT_AI_TRANSFER_KEY = 'lab.admin.audit.ai.transfer'
+const tableRef = ref(null)
+const router = useRouter()
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
+const selectedAuditMap = ref({})
 const filters = reactive({
   action: '',
   operator: '',
@@ -89,6 +108,11 @@ const filters = reactive({
   startDate: '',
   endDate: ''
 })
+
+const selectedRows = computed(() =>
+  Object.values(selectedAuditMap.value).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+)
+const selectedCount = computed(() => selectedRows.value.length)
 
 const targetTypes = [
   { label: '全部类型', value: '' },
@@ -149,6 +173,131 @@ function formatDetail(detail) {
   }
 }
 
+function cloneAuditRow(row = {}) {
+  return {
+    id: Number(row.id || 0),
+    createdAt: String(row.createdAt || '').trim(),
+    action: String(row.action || '').trim(),
+    operatorId: row.operatorId ?? '',
+    operatorName: String(row.operatorName || '').trim(),
+    operatorRole: String(row.operatorRole || '').trim(),
+    targetType: String(row.targetType || '').trim(),
+    targetId: row.targetId ?? '',
+    ip: String(row.ip || '').trim(),
+    detail: row.detail && typeof row.detail === 'object' && !Array.isArray(row.detail) ? { ...row.detail } : {}
+  }
+}
+
+function clearSelectedRows() {
+  selectedAuditMap.value = {}
+  if (tableRef.value?.clearSelection) {
+    tableRef.value.clearSelection()
+  }
+}
+
+function handleSelectionChange(selection = []) {
+  const nextMap = { ...selectedAuditMap.value }
+  for (const row of rows.value) {
+    const id = Number(row?.id || 0)
+    if (id > 0) delete nextMap[id]
+  }
+  for (const row of selection) {
+    const normalized = cloneAuditRow(row)
+    if (normalized.id > 0) {
+      nextMap[normalized.id] = normalized
+    }
+  }
+  selectedAuditMap.value = nextMap
+}
+
+async function syncTableSelection() {
+  await nextTick()
+  if (!tableRef.value?.toggleRowSelection) return
+  for (const row of rows.value) {
+    const id = Number(row?.id || 0)
+    if (id > 0 && selectedAuditMap.value[id]) {
+      tableRef.value.toggleRowSelection(row, true)
+    }
+  }
+}
+
+function toCsvCell(value) {
+  if (value === null || value === undefined) return '""'
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function downloadCsvFile(filename, dataRows = []) {
+  const header = ['id', 'created_at', 'action', 'operator_id', 'operator_name', 'operator_role', 'target_type', 'target_id', 'ip', 'detail_json']
+  const lines = [header.join(',')]
+  for (const row of dataRows) {
+    lines.push(
+      [
+        row.id,
+        row.createdAt,
+        row.action,
+        row.operatorId,
+        row.operatorName,
+        row.operatorRole,
+        row.targetType,
+        row.targetId,
+        row.ip,
+        row.detail && typeof row.detail === 'object' ? JSON.stringify(row.detail) : ''
+      ].map(toCsvCell).join(',')
+    )
+  }
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function exportSelectedLogs() {
+  if (selectedCount.value === 0) {
+    ElMessage.warning('请先勾选需要导出的审计日志')
+    return
+  }
+  downloadCsvFile('audit_logs_selected.csv', selectedRows.value)
+  ElMessage.success(`已导出 ${selectedCount.value} 条已选日志`)
+}
+
+function explainSelectedLogs() {
+  if (selectedCount.value === 0) {
+    ElMessage.warning('请先勾选要交给 AI 的审计日志')
+    return
+  }
+  const normalizedFilters = {
+    action: String(filters.action || '').trim(),
+    operator: String(filters.operator || '').trim(),
+    targetType: String(filters.targetType || '').trim(),
+    startDate: String(filters.startDate || '').trim(),
+    endDate: String(filters.endDate || '').trim()
+  }
+  const payload = {
+    source: 'audit-logs',
+    selectedCount: selectedCount.value,
+    displayText: `请解释我从审计日志页选中的 ${selectedCount.value} 条日志`,
+    filters: normalizedFilters,
+    logs: selectedRows.value.map((row) => cloneAuditRow(row)),
+    createdAt: Date.now()
+  }
+  window.sessionStorage.setItem(AUDIT_AI_TRANSFER_KEY, JSON.stringify(payload))
+  router.push({
+    path: '/ai-knowledge-center',
+    query: {
+      tab: 'assistant',
+      from: 'audit-logs',
+      selected: String(selectedCount.value),
+      at: String(payload.createdAt)
+    }
+  })
+}
+
 async function fetchLogs() {
   if (!validateRange()) return
   loading.value = true
@@ -158,10 +307,12 @@ async function fetchLogs() {
     total.value = Number(response.data?.meta?.total || 0)
   } finally {
     loading.value = false
+    syncTableSelection()
   }
 }
 
 function queryLogs() {
+  clearSelectedRows()
   page.value = 1
   fetchLogs()
 }
@@ -172,6 +323,7 @@ function resetFilters() {
   filters.targetType = ''
   filters.startDate = ''
   filters.endDate = ''
+  clearSelectedRows()
   page.value = 1
   pageSize.value = 50
   fetchLogs()
@@ -249,6 +401,19 @@ onMounted(() => {
   color: var(--app-muted);
 }
 
+.table-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.selection-text {
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
 .eyebrow {
   display: inline-flex;
   width: fit-content;
@@ -280,7 +445,8 @@ onMounted(() => {
 @media (max-width: 768px) {
   .hero-card,
   .hero-actions,
-  .table-head {
+  .table-head,
+  .table-tools {
     flex-direction: column;
     align-items: flex-start;
   }

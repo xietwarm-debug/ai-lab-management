@@ -430,6 +430,7 @@
 <script setup>
 import { computed, ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 import { 
   Position, Search, ChatLineRound, ArrowDown,
   Refresh, Delete, Setting, QuestionFilled,
@@ -451,10 +452,13 @@ import {
   toggleAgentFileKnowledge,
   executeAgentImport
 } from '@/api/ai'
+import { explainAuditLogsAi } from '@/api/audit'
 import { getLabs } from '@/api/labs'
 import assistantAvatar from '@/static/ningning.png'
 
+const AUDIT_AI_TRANSFER_KEY = 'lab.admin.audit.ai.transfer'
 const chatBodyRef = ref(null)
+const route = useRoute()
 const isComposerFocused = ref(false)
 const pageLoading = ref(false)
 const chatLoading = ref(false)
@@ -1165,11 +1169,6 @@ async function handleDeleteFile(id) {
   }
 }
 
-function submitWebSearch() {
-  chatInput.value = '请联网搜索实验室管理相关的最新政策或设备资料，并给我简要总结'
-  submitChat()
-}
-
 async function sendChatText(text, options = {}) {
   const {
     appendUser = true,
@@ -1213,6 +1212,55 @@ async function submitChat() {
   }
 }
 
+function consumeTransferredAuditPayload() {
+  if (typeof window === 'undefined') return null
+  const fromAudit = String(route.query.from || '').trim() === 'audit-logs'
+  const raw = window.sessionStorage.getItem(AUDIT_AI_TRANSFER_KEY)
+  if (!raw) return null
+  window.sessionStorage.removeItem(AUDIT_AI_TRANSFER_KEY)
+  if (!fromAudit) return null
+  try {
+    const payload = JSON.parse(raw)
+    const logs = Array.isArray(payload?.logs) ? payload.logs : []
+    if (logs.length === 0) return null
+    return {
+      displayText: String(payload?.displayText || '').trim(),
+      selectedCount: Number(payload?.selectedCount || 0),
+      logs,
+      filters: payload?.filters && typeof payload.filters === 'object' ? payload.filters : {}
+    }
+  } catch (error) {
+    return null
+  }
+}
+
+async function handleTransferredAuditLogs() {
+  const payload = consumeTransferredAuditPayload()
+  if (!payload) return
+  const count = Math.max(0, Number(payload.selectedCount || 0))
+  ElMessage.success(count > 0 ? `已接收 ${count} 条审计日志，正在交给 AI 解释` : '已接收审计日志，正在交给 AI 解释')
+  const displayText = payload.displayText || (count > 0 ? `请解释我从审计日志页选中的 ${count} 条日志` : '请解释我从审计日志页带来的日志')
+  appendMessage('user', displayText)
+  try {
+    await withChatLoading(async () => {
+      const response = await explainAuditLogsAi({
+        logs: payload.logs,
+        filters: payload.filters
+      })
+      const result = response?.data?.data || {}
+      const reply = String(result.reply || '').trim() || 'AI 暂时没有返回审计日志解释。'
+      appendMessage('assistant', reply, [], {
+        action: 'audit_logs_explain',
+        source: String(result.source || 'audit-ai'),
+        model: String(result.model || '').trim(),
+        selectedCount: Number(result.selectedCount || count || 0)
+      })
+    })
+  } catch (error) {
+    appendMessage('assistant', buildErrorText(error, '审计日志解释请求失败，请稍后重试。'))
+  }
+}
+
 async function usePrompt(prompt) {
   await sendChatText(prompt)
 }
@@ -1225,6 +1273,11 @@ function findNearestUserText(index) {
     }
   }
   return ''
+}
+
+function submitWebSearch() {
+  chatInput.value = '请联网搜索实验室管理相关的最新政策或设备资料，并给我简要总结'
+  submitChat()
 }
 
 async function regenerateMessage(index) {
@@ -1334,11 +1387,12 @@ async function scrollToBottom() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   helperDateOptions.value = buildHelperDateOptions()
   initSpeechRecognition()
-  loadHistory(false)
+  await loadHistory(false)
   loadFiles()
+  await handleTransferredAuditLogs()
 })
 
 onBeforeUnmount(() => {

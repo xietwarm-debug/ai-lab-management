@@ -230,12 +230,20 @@ export default {
     },
     async generateAnnouncementDraft() {
       if (this.draftingAnnouncement || this.publishing) return
+      const titleHint = String(this.announcementTitle || "").trim()
+      const contentHint = String(this.announcementContent || "").trim()
+      if (!titleHint || !contentHint) {
+        uni.showToast({ title: "请先填写标题和大概内容", icon: "none" })
+        return
+      }
       this.draftingAnnouncement = true
       try {
         const sceneHint = this.sceneHint()
         const res = await adminGenerateAnnouncementAiDraft({
           titleHint: String(this.announcementTitle || "").trim() || sceneHint.titleHint,
           contentHint: String(this.announcementContent || "").trim() || sceneHint.contentHint,
+          titleHint,
+          contentHint,
           publishAt: this.normalizePublishAtInput(this.announcementPublishAt),
           isPinned: !!this.announcementPinned
         })

@@ -613,10 +613,16 @@ def _format_reminder_row(row, period_map):
     }
 
 
-def _query_reminders_by_range(start_date, end_date):
+def _query_reminders_by_range(start_date, end_date, template_id=None):
     period_map = _get_period_config_map()
+    where = ["occurrence_date BETWEEN %s AND %s"]
+    params = [start_date, end_date]
+    tpl_id = int(_to_int_or_none(template_id) or 0)
+    if tpl_id > 0:
+        where.append("template_id=%s")
+        params.append(tpl_id)
     rows = query(
-        """
+        f"""
         SELECT id,
                template_id AS templateId,
                schedule_item_id AS scheduleItemId,
@@ -640,10 +646,10 @@ def _query_reminders_by_range(start_date, end_date):
                handled_at AS handledAt,
                handle_note AS handleNote
         FROM door_open_reminders
-        WHERE occurrence_date BETWEEN %s AND %s
+        WHERE {' AND '.join(where)}
         ORDER BY occurrence_date ASC, period_start ASC, lab_name ASC, id ASC
         """,
-        (start_date, end_date),
+        tuple(params),
     )
     return [_format_reminder_row(row, period_map) for row in (rows or [])]
 
@@ -688,16 +694,47 @@ def admin_list_schedule_templates():
                  FROM course_schedule_items i
                  WHERE i.template_id=t.id
                    AND i.status='active'
-               ) AS itemCount
+               ) AS itemCount,
+               (
+                 SELECT COUNT(DISTINCT NULLIF(TRIM(i.course_name), ''))
+                 FROM course_schedule_items i
+                 WHERE i.template_id=t.id
+                   AND i.status='active'
+               ) AS courseCount
         FROM course_schedule_templates t
         ORDER BY CASE WHEN t.status='active' THEN 0 ELSE 1 END, t.id DESC
         """
     )
+    template_ids = [int(_to_int_or_none((row or {}).get("id")) or 0) for row in (rows or []) if int(_to_int_or_none((row or {}).get("id")) or 0) > 0]
+    preview_map = {}
+    if template_ids:
+        course_rows = query(
+            f"""
+            SELECT template_id AS templateId,
+                   course_name AS courseName
+            FROM course_schedule_items
+            WHERE template_id IN ({",".join(["%s"] * len(template_ids))})
+              AND status='active'
+              AND TRIM(course_name)<>''
+            ORDER BY template_id ASC, course_name ASC
+            """,
+            tuple(template_ids),
+        )
+        for course_row in course_rows or []:
+            template_id = int(_to_int_or_none((course_row or {}).get("templateId")) or 0)
+            course_name = str((course_row or {}).get("courseName") or "").strip()
+            if template_id <= 0 or not course_name:
+                continue
+            preview_map.setdefault(template_id, [])
+            if course_name not in preview_map[template_id]:
+                preview_map[template_id].append(course_name)
     data = []
     for row in rows or []:
+        template_id = int(_to_int_or_none((row or {}).get("id")) or 0)
+        preview_names = preview_map.get(template_id, [])
         data.append(
             {
-                "id": int(_to_int_or_none((row or {}).get("id")) or 0),
+                "id": template_id,
                 "termName": str((row or {}).get("termName") or "").strip(),
                 "semesterStartDate": str((row or {}).get("semesterStartDate") or "").strip(),
                 "semesterWeeks": int(_to_int_or_none((row or {}).get("semesterWeeks")) or 0),
@@ -709,6 +746,8 @@ def admin_list_schedule_templates():
                 "createdAt": _to_text_time((row or {}).get("createdAt")),
                 "updatedAt": _to_text_time((row or {}).get("updatedAt")),
                 "itemCount": int(_to_int_or_none((row or {}).get("itemCount")) or 0),
+                "courseCount": int(_to_int_or_none((row or {}).get("courseCount")) or 0),
+                "coursePreview": preview_names[:4],
             }
         )
     return jsonify({"ok": True, "data": data})
@@ -1116,7 +1155,7 @@ def admin_today_door_reminders():
     tpl = _resolve_template_row(only_active=True)
     _ensure_reminders_for_range(date_text, date_text, tpl)
     _refresh_reminder_runtime_status(date_text, date_text)
-    rows = _query_reminders_by_range(date_text, date_text)
+    rows = _query_reminders_by_range(date_text, date_text, (tpl or {}).get("id"))
     return jsonify({"ok": True, "data": {"date": date_text, "list": rows}})
 
 
@@ -1130,7 +1169,7 @@ def admin_week_door_reminders():
     tpl = _resolve_template_row(only_active=True)
     _ensure_reminders_for_range(start, end, tpl)
     _refresh_reminder_runtime_status(start, end)
-    rows = _query_reminders_by_range(start, end)
+    rows = _query_reminders_by_range(start, end, (tpl or {}).get("id"))
     return jsonify({"ok": True, "data": {"startDate": start, "endDate": end, "list": rows}})
 
 

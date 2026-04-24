@@ -22,36 +22,84 @@
         <view class="card" v-if="canManagePermissions">
           <view class="rowBetween">
             <view>
-              <view class="cardTitle">资产只读权限</view>
-              <view class="muted">用于手机端只读资产查询和 AI 资产问答。</view>
+              <view class="cardTitle">权限配置</view>
+              <view class="muted">教师和学生支持单独配置通用权限与 AI 权限，授权后立即生效。</view>
             </view>
-            <view class="statusPill" :class="permissionStatusClass(assetReadPermission)">
-              {{ permissionStatusText(assetReadPermission) }}
+            <button class="btnSecondary miniBtn" size="mini" :disabled="permissionBusy" @click="refreshPermissionPanels">刷新</button>
+          </view>
+
+          <view class="permissionBlock">
+            <view class="rowBetween permissionHead">
+              <view>
+                <view class="permissionTitle">资产只读权限</view>
+                <view class="muted">用于手机端只读资产查询和 AI 资产问答。</view>
+              </view>
+              <view class="statusPill" :class="permissionStatusClass(assetReadPermission)">
+                {{ permissionStatusText(assetReadPermission) }}
+              </view>
+            </view>
+            <view class="muted permissionMeta">
+              来源：{{ permissionSourceText(assetReadPermission) }}
+              <text v-if="assetReadPermission && assetReadPermission.expiresAt"> · 到期：{{ assetReadPermission.expiresAt }}</text>
+              <text v-else-if="assetReadPermission && assetReadPermission.granted"> · 长期有效</text>
+            </view>
+            <view class="actions">
+              <button
+                v-if="!(assetReadPermission && assetReadPermission.granted)"
+                class="btnPrimary miniBtn"
+                size="mini"
+                :disabled="permissionBusy"
+                @click="grantAssetReadPermission"
+              >
+                授权
+              </button>
+              <button
+                v-else
+                class="btnDanger miniBtn"
+                size="mini"
+                :disabled="permissionBusy"
+                @click="revokeAssetReadPermission"
+              >
+                撤销
+              </button>
             </view>
           </view>
-          <view class="muted permissionMeta" v-if="assetReadPermission && assetReadPermission.expiresAt">
-            到期时间：{{ assetReadPermission.expiresAt }}
-          </view>
-          <view class="actions">
-            <button class="btnSecondary miniBtn" size="mini" :disabled="permissionLoading" @click="fetchPermissions">刷新</button>
-            <button
-              v-if="!(assetReadPermission && assetReadPermission.granted)"
-              class="btnPrimary miniBtn"
-              size="mini"
-              :disabled="permissionLoading"
-              @click="grantAssetReadPermission"
-            >
-              授权
-            </button>
-            <button
-              v-else
-              class="btnDanger miniBtn"
-              size="mini"
-              :disabled="permissionLoading"
-              @click="revokeAssetReadPermission"
-            >
-              撤销
-            </button>
+
+          <view class="permissionBlock">
+            <view class="rowBetween permissionHead">
+              <view>
+                <view class="permissionTitle">AI 查看预约占用人</view>
+                <view class="muted">允许 AI 在预约相关问答里查看预约记录中的占用人信息。</view>
+              </view>
+              <view class="statusPill" :class="permissionStatusClass(aiReservationViewOwnerPermission)">
+                {{ permissionStatusText(aiReservationViewOwnerPermission) }}
+              </view>
+            </view>
+            <view class="muted permissionMeta">
+              来源：{{ permissionSourceText(aiReservationViewOwnerPermission) }}
+              <text v-if="aiReservationViewOwnerPermission && aiReservationViewOwnerPermission.expiresAt"> · 到期：{{ aiReservationViewOwnerPermission.expiresAt }}</text>
+              <text v-else-if="aiReservationViewOwnerPermission && aiReservationViewOwnerPermission.granted"> · 长期有效</text>
+            </view>
+            <view class="actions">
+              <button
+                v-if="!(aiReservationViewOwnerPermission && aiReservationViewOwnerPermission.granted)"
+                class="btnPrimary miniBtn"
+                size="mini"
+                :disabled="permissionBusy"
+                @click="grantAiReservationViewOwnerPermission"
+              >
+                授权
+              </button>
+              <button
+                v-else
+                class="btnDanger miniBtn"
+                size="mini"
+                :disabled="permissionBusy"
+                @click="revokeAiReservationViewOwnerPermission"
+              >
+                撤销
+              </button>
+            </view>
           </view>
         </view>
 
@@ -136,9 +184,18 @@
 </template>
 
 <script>
-import { BASE_URL, adminGetUserPermissions, adminGrantUserPermission, adminRevokeUserPermission } from "@/common/api.js"
+import {
+  BASE_URL,
+  adminGetUserAiPermissions,
+  adminGetUserPermissions,
+  adminGrantUserAiPermission,
+  adminGrantUserPermission,
+  adminRevokeUserAiPermission,
+  adminRevokeUserPermission
+} from "@/common/api.js"
 
 const PERMISSION_ASSET_READ_BASIC = "asset.read_basic"
+const AI_PERMISSION_RESERVATION_VIEW_OWNER = "ai.reservation.view_owner"
 
 function toInt(v, d = 0) {
   const n = Number(v)
@@ -151,8 +208,10 @@ export default {
       uid: 0,
       loading: false,
       permissionLoading: false,
+      aiPermissionLoading: false,
       currentRole: "",
       permissionRows: [],
+      aiPermissionRows: [],
       currentTab: "reservations",
       tabs: [
         { label: "预约", value: "reservations" },
@@ -172,9 +231,16 @@ export default {
       const targetRole = String((this.user || {}).role || "").trim()
       return this.currentRole === "admin" && (targetRole === "teacher" || targetRole === "student")
     },
+    permissionBusy() {
+      return this.permissionLoading || this.aiPermissionLoading
+    },
     assetReadPermission() {
       const rows = Array.isArray(this.permissionRows) ? this.permissionRows : []
       return rows.find((item) => String((item && item.permissionCode) || "").trim() === PERMISSION_ASSET_READ_BASIC) || null
+    },
+    aiReservationViewOwnerPermission() {
+      const rows = Array.isArray(this.aiPermissionRows) ? this.aiPermissionRows : []
+      return rows.find((item) => String((item && item.permissionCode) || "").trim() === AI_PERMISSION_RESERVATION_VIEW_OWNER) || null
     },
     summaryCards() {
       return [
@@ -214,7 +280,7 @@ export default {
       return "停用"
     },
     permissionStatusText(row) {
-      if (row && row.granted) return "已授权"
+      if (row && row.granted) return row.source === "role_default" ? "默认拥有" : "已授权"
       if (row && row.source === "expired") return "已过期"
       return "未授权"
     },
@@ -222,6 +288,12 @@ export default {
       if (row && row.granted) return "statusGranted"
       if (row && row.source === "expired") return "statusExpired"
       return "statusPlain"
+    },
+    permissionSourceText(row) {
+      if (row && row.source === "role_default") return "角色默认"
+      if (row && row.source === "user_grant") return "管理员授权"
+      if (row && row.source === "expired") return "授权过期"
+      return "未授权"
     },
     async fetchPermissions() {
       if (!this.canManagePermissions || this.uid <= 0) return
@@ -236,6 +308,24 @@ export default {
       } finally {
         this.permissionLoading = false
       }
+    },
+    async fetchAiPermissions() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      this.aiPermissionLoading = true
+      try {
+        const res = await adminGetUserAiPermissions(this.uid)
+        const payload = (res && res.data) || {}
+        const data = payload && payload.ok ? payload.data : {}
+        this.aiPermissionRows = Array.isArray(data.items) ? data.items : []
+      } catch (e) {
+        this.aiPermissionRows = []
+      } finally {
+        this.aiPermissionLoading = false
+      }
+    },
+    async refreshPermissionPanels() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      await Promise.all([this.fetchPermissions(), this.fetchAiPermissions()])
     },
     async grantAssetReadPermission() {
       if (!this.canManagePermissions || this.uid <= 0) return
@@ -274,6 +364,43 @@ export default {
         }
       })
     },
+    async grantAiReservationViewOwnerPermission() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      this.aiPermissionLoading = true
+      try {
+        const res = await adminGrantUserAiPermission(this.uid, { permissionCode: AI_PERMISSION_RESERVATION_VIEW_OWNER })
+        const payload = (res && res.data) || {}
+        if (!payload.ok) throw new Error(payload.msg || "授权失败")
+        uni.showToast({ title: "已授权", icon: "success" })
+        await this.fetchAiPermissions()
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || "授权失败", icon: "none" })
+      } finally {
+        this.aiPermissionLoading = false
+      }
+    },
+    revokeAiReservationViewOwnerPermission() {
+      if (!this.canManagePermissions || this.uid <= 0) return
+      uni.showModal({
+        title: "撤销 AI 权限",
+        content: "确认撤销该用户的 AI 查看预约占用人权限吗？",
+        success: async (modalRes) => {
+          if (!modalRes.confirm) return
+          this.aiPermissionLoading = true
+          try {
+            const res = await adminRevokeUserAiPermission(this.uid, { permissionCode: AI_PERMISSION_RESERVATION_VIEW_OWNER })
+            const payload = (res && res.data) || {}
+            if (!payload.ok) throw new Error(payload.msg || "撤销失败")
+            uni.showToast({ title: "已撤销", icon: "success" })
+            await this.fetchAiPermissions()
+          } catch (e) {
+            uni.showToast({ title: (e && e.message) || "撤销失败", icon: "none" })
+          } finally {
+            this.aiPermissionLoading = false
+          }
+        }
+      })
+    },
     fetchDetail() {
       if (this.uid <= 0) return
       this.loading = true
@@ -287,7 +414,7 @@ export default {
             return
           }
           this.detail = payload.data || {}
-          this.fetchPermissions()
+          this.refreshPermissionPanels()
         },
         fail: () => uni.showToast({ title: "请求失败", icon: "none" }),
         complete: () => { this.loading = false }
@@ -305,6 +432,9 @@ export default {
 .metricCard { min-height: 78px; }
 .metricLabel { font-size: 12px; color: #64748b; }
 .metricValue { margin-top: 4px; font-size: 22px; font-weight: 700; color: #0f172a; }
+.permissionBlock + .permissionBlock { margin-top: 14px; }
+.permissionHead { margin-top: 8px; }
+.permissionTitle { font-size: 16px; font-weight: 600; color: #0f172a; }
 .permissionMeta { margin-top: 8px; }
 .statusPill { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .statusGranted { background: #ecfdf5; color: #047857; }

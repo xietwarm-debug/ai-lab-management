@@ -121,7 +121,22 @@
                   </el-col>
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="值班人">
-                      <el-input v-model="dutyForm.assigneeName" placeholder="填写值班人姓名" />
+                      <el-select 
+                        v-model="dutyForm.assigneeName" 
+                        placeholder="选择或输入值班人姓名" 
+                        filterable
+                        allow-create
+                        default-first-option
+                        style="width: 100%"
+                        @change="handleAdminSelectByName"
+                      >
+                        <el-option 
+                          v-for="admin in adminOptions" 
+                          :key="admin.id" 
+                          :label="admin.nickname || admin.username" 
+                          :value="admin.nickname || admin.username"
+                        />
+                      </el-select>
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="12">
@@ -396,6 +411,7 @@ import { RefreshRight, Calendar, Warning, Phone } from '@element-plus/icons-vue'
 
 // 假设的 API
 import { getLabs } from '@/api/labs'
+import { getUsers } from '@/api/users'
 import {
   deleteEmergencyContact,
   getDutyRoster,
@@ -419,6 +435,7 @@ const dutyRows = ref([])
 const incidentRows = ref([])
 const contactRows = ref([])
 const labOptions = ref([])
+const adminOptions = ref([])
 const dutyDefaultTemplates = ref({})
 const dutyDefaultStorageKey = 'lab_admin_duty_defaults'
 
@@ -710,16 +727,18 @@ function syncIncidentLabName() {
 async function loadAll() {
   loading.value = true
   try {
-    const [labRes, dutyRes, incidentRes, contactRes] = await Promise.all([
+    const [labRes, dutyRes, incidentRes, contactRes, userRes] = await Promise.all([
       getLabs({ pageSize: 500 }).catch(() => ({ data: { data: [] } })),
       getDutyRoster({}).catch(() => ({ data: { data: [] } })),
       getIncidents({}).catch(() => ({ data: { data: [] } })),
-      getEmergencyContacts({}).catch(() => ({ data: { data: [] } }))
+      getEmergencyContacts({}).catch(() => ({ data: { data: [] } })),
+      getUsers({ role: 'admin', pageSize: 500 }).catch(() => ({ data: { data: [] } }))
     ])
     labOptions.value = Array.isArray(labRes.data?.data) ? labRes.data.data : []
     dutyRows.value = Array.isArray(dutyRes.data?.data) ? dutyRes.data.data : []
     incidentRows.value = Array.isArray(incidentRes.data?.data) ? incidentRes.data.data : []
     contactRows.value = Array.isArray(contactRes.data?.data) ? contactRes.data.data : []
+    adminOptions.value = Array.isArray(userRes.data?.data) ? userRes.data.data : []
     await ensureDutyDefaultsForCurrentWeek()
   } finally {
     loading.value = false
@@ -752,6 +771,14 @@ function editDuty(row) {
   selectedDutySlot.value = {
     date: row.dutyDate || '',
     slotKey: resolveDutySlot(row.shiftName)?.key || ''
+  }
+}
+
+function handleAdminSelectByName(name) {
+  if (!name) return
+  const admin = adminOptions.value.find(item => (item.nickname || item.username) === name)
+  if (admin) {
+    dutyForm.assigneePhone = admin.phone || ''
   }
 }
 

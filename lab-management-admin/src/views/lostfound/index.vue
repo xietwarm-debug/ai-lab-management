@@ -330,7 +330,7 @@ function buildRouteQuery() {
 async function fetchRows() {
   loading.value = true
   try {
-    const response = await getLostFoundList(buildQuery()).catch(() => ({ data: [] })) // Fallback mock
+    const response = await getLostFoundList(buildQuery())
     rows.value = Array.isArray(response.data) ? response.data : []
     await nextTick()
     scrollToFocusedItem()

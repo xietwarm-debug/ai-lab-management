@@ -45,13 +45,20 @@
             </view>
             <view class="tableRow bodyRow" v-for="row in rows" :key="row.key">
               <view class="cell labCell labName">{{ row.labName || "-" }}</view>
-              <view class="cell dayCell" v-for="d in dayColumns" :key="`${row.key}-${d.weekDay}`">
+              <view
+                class="cell dayCell"
+                :class="{ cellClickable: row.cells[d.weekDay] && row.cells[d.weekDay].length > 0 }"
+                v-for="d in dayColumns"
+                :key="`${row.key}-${d.weekDay}`"
+                @click="openCell(row, d)"
+              >
                 <view v-if="!row.cells[d.weekDay] || row.cells[d.weekDay].length===0" class="cellEmpty">-</view>
                 <view v-else class="courseList">
                   <view class="courseItem" v-for="item in row.cells[d.weekDay]" :key="item.key">
                     <view class="courseTitle">{{ item.periodText || "-" }} · {{ item.courseName || "-" }}</view>
                     <view class="courseMeta">{{ item.teacherName || "-" }} · {{ item.className || "-" }}</view>
                   </view>
+                  <view class="courseHint">点击查看当天详情</view>
                 </view>
               </view>
             </view>
@@ -221,6 +228,16 @@ export default {
     goCurrentWeek() {
       this.weekStartDate = mondayOf(todayText())
       this.loadAll()
+    },
+    openCell(row, day) {
+      const items = row && row.cells ? row.cells[day.weekDay] : []
+      if (!Array.isArray(items) || items.length <= 0) return
+      const labId = Number((row && row.labId) || 0)
+      const date = String((day && day.date) || "").trim()
+      if (!labId || !date) return
+      uni.navigateTo({
+        url: `/pages/admin/lab_schedule_detail?labId=${encodeURIComponent(String(labId))}&date=${encodeURIComponent(date)}&mode=day`
+      })
     }
   }
 }
@@ -345,6 +362,15 @@ export default {
   margin-top: 2px;
   font-size: 11px;
   color: #64748b;
+}
+
+.courseHint {
+  font-size: 11px;
+  color: #2563eb;
+}
+
+.cellClickable {
+  background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
 }
 
 .empty {

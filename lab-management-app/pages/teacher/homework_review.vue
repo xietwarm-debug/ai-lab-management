@@ -83,7 +83,14 @@
           <view class="meta muted" v-if="item.reviewedAt">批改时间：{{ item.reviewedAt }}（{{ item.reviewedBy || "-" }}）</view>
           <view class="meta aiMeta" v-if="suggestionSummary(item.id)">{{ suggestionSummary(item.id) }}</view>
           <view class="aiReasonList" v-if="suggestionReasonLines(item.id).length > 0">
-            <view class="aiReasonRow" v-for="(line, idx) in suggestionReasonLines(item.id)" :key="`${item.id}-${idx}`">{{ line }}</view>
+            <view 
+              class="aiReasonRow" 
+              :class="typeof line === 'object' ? line.class : ''"
+              v-for="(line, idx) in suggestionReasonLines(item.id)" 
+              :key="`${item.id}-${idx}`"
+            >
+              {{ typeof line === 'object' ? line.text : line }}
+            </view>
           </view>
           <view class="editorCard">
             <input
@@ -444,6 +451,31 @@ export default {
       const metrics = suggestion && suggestion.metrics ? suggestion.metrics : {}
       const lines = []
       const metricParts = []
+      
+      // ========== 新增：显示查重率（带样式类）==========
+      if (metrics.plagiarismRate != null) {
+        const rate = Number(metrics.plagiarismRate)
+        let plagiarismText = `算法查重率（TF-IDF）：${rate.toFixed(2)}%`
+        let styleClass = ''
+        
+        // 根据查重率添加不同的样式类和标记
+        if (rate > 80) {
+          plagiarismText = `⚠️ ${plagiarismText}（疑似抄袭！）`
+          styleClass = 'plagiarismHigh'
+        } else if (rate > 60) {
+          plagiarismText = `⚡ ${plagiarismText}（建议人工复核）`
+          styleClass = 'plagiarismMedium'
+        } else if (rate > 40) {
+          plagiarismText = `📊 ${plagiarismText}`
+        } else {
+          plagiarismText = `✅ ${plagiarismText}（原创度高）`
+        }
+        
+        // 返回包含文本和样式的对象
+        lines.push({ text: plagiarismText, class: styleClass })
+      }
+      // ======================================
+      
       if (metrics.fileSize != null && Number(metrics.fileSize) > 0) {
         metricParts.push(`文件 ${(Number(metrics.fileSize) / 1024).toFixed(1)} KB`)
       }
@@ -453,16 +485,16 @@ export default {
       if (metrics.delayHours != null && Number(metrics.delayHours) > 0) {
         metricParts.push(`迟交 ${Number(metrics.delayHours).toFixed(1)} 小时`)
       }
-      if (metricParts.length > 0) lines.push(`依据：${metricParts.join("，")}`)
+      if (metricParts.length > 0) lines.push({ text: `依据：${metricParts.join("，")}`, class: '' })
       ;["signals", "risks", "limitations"].forEach((field) => {
         const values = Array.isArray(suggestion[field]) ? suggestion[field] : []
         values.slice(0, 2).forEach((text) => {
           const label = this.issueLabel(field === "signals" ? "signal" : field === "risks" ? "risk" : "limitation")
           const clean = String(text || "").trim()
-          if (clean) lines.push(`${label}：${clean}`)
+          if (clean) lines.push({ text: `${label}：${clean}`, class: '' })
         })
       })
-      return lines.slice(0, 6)
+      return lines.slice(0, 8)  // 从6改为8，给查重率留空间
     },
     issueLabel(kind) {
       const key = String(kind || "").trim()
@@ -740,6 +772,25 @@ export default {
   font-size: 12px;
   color: #475569;
   line-height: 1.5;
+}
+
+// 新增：查重率高亮样式
+.aiReasonRow.plagiarismHigh {
+  color: #dc2626;
+  font-weight: bold;
+  background: rgba(254, 226, 226, 0.6);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border-left: 3px solid #dc2626;
+}
+
+.aiReasonRow.plagiarismMedium {
+  color: #ea580c;
+  font-weight: 600;
+  background: rgba(255, 237, 213, 0.6);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border-left: 3px solid #ea580c;
 }
 
 .aiReasonRow:first-child {

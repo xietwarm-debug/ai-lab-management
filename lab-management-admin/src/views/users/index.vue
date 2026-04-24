@@ -165,9 +165,10 @@
           </template>
         </el-table-column>
         <el-table-column prop="lastLoginAt" label="最近登录" min-width="180" />
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="viewDetail(row)">详情</el-button>
+            <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link @click="toggleFreeze(row)">{{ row.isFrozen ? '解冻' : '冻结' }}</el-button>
             <el-button link @click="handleResetPassword(row)">重置密码</el-button>
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
@@ -424,6 +425,48 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="editVisible" title="编辑用户" width="720px">
+      <el-form label-position="top">
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="账号">
+              <el-input v-model="editForm.username" disabled />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="角色">
+              <el-input v-model="editForm.role" disabled />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="昵称">
+              <el-input v-model.trim="editForm.nickname" placeholder="可选" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="手机号">
+              <el-input v-model.trim="editForm.phone" placeholder="可选" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12" v-if="editForm.role === 'student'">
+            <el-form-item label="班级">
+              <el-input v-model.trim="editForm.className" placeholder="如：计科2301" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12" v-if="editForm.role === 'student'">
+            <el-form-item label="毕业年份">
+              <el-input-number v-model="editForm.graduationYear" :min="2000" :max="2200" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editLoading" @click="submitEditUser">保存修改</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="batchVisible" title="批量生成学生账号" width="820px">
       <el-form label-position="top">
         <el-row :gutter="16">
@@ -585,7 +628,8 @@ import {
   revokeUserAiPermission,
   revokeUserPermission,
   setUserRole,
-  unfreezeUser
+  unfreezeUser,
+  updateUser
 } from '@/api/users'
 
 const AI_RESERVATION_VIEW_OWNER = 'ai.reservation.view_owner'
@@ -596,6 +640,7 @@ const detailLoading = ref(false)
 const aiPermissionLoading = ref(false)
 const permissionLoading = ref(false)
 const createLoading = ref(false)
+const editLoading = ref(false)
 const batchPreviewLoading = ref(false)
 const batchSubmitLoading = ref(false)
 const importLoading = ref(false)
@@ -613,6 +658,7 @@ const createVisible = ref(false)
 const batchVisible = ref(false)
 const importVisible = ref(false)
 const graduateVisible = ref(false)
+const editVisible = ref(false)
 
 const batchPreviewRows = ref([])
 const graduatePreviewRows = ref([])
@@ -686,6 +732,16 @@ const createForm = reactive({
   graduationYear: new Date().getFullYear() + 4
 })
 
+const editForm = reactive({
+  id: null,
+  username: '',
+  role: '',
+  nickname: '',
+  phone: '',
+  className: '',
+  graduationYear: 0
+})
+
 const batchForm = reactive({
   prefix: '',
   className: '',
@@ -740,6 +796,16 @@ function resetCreateForm() {
   createForm.phone = ''
   createForm.className = ''
   createForm.graduationYear = new Date().getFullYear() + 4
+}
+
+function resetEditForm() {
+  editForm.id = null
+  editForm.username = ''
+  editForm.role = ''
+  editForm.nickname = ''
+  editForm.phone = ''
+  editForm.className = ''
+  editForm.graduationYear = 0
 }
 
 function resetBatchForm() {
@@ -1090,21 +1156,21 @@ async function handleRevokeAiPermission(permissionCode) {
 async function handleGrantPermission(permissionCode) {
   const user = detail.value?.user || {}
   if (!canGrantAiPermission(user)) {
-    ElMessage.warning('浠呮敮鎸佺粰鏁欏笀鎴栧鐢熸巿鏉?')
+    ElMessage.warning('仅支持给教师或学生授予通用权限')
     return
   }
   let promptResult
   try {
     promptResult = await ElMessageBox.prompt(
-      '鍙暀绌鸿〃绀洪暱鏈熸湁鏁堬紱濡傞渶璁剧疆杩囨湡鏃堕棿锛岃杈撳叆 YYYY-MM-DD HH:mm:ss銆?',
-      '鎺堟潈閫氱敤鏉冮檺',
+      '可留空表示长期有效；如需设置过期时间，请输入 YYYY-MM-DD HH:mm:ss。',
+      '授权通用权限',
       {
-        confirmButtonText: '鎺堟潈',
-        cancelButtonText: '鍙栨秷',
+        confirmButtonText: '授权',
+        cancelButtonText: '取消',
         inputValue: '',
-        inputPlaceholder: '渚嬪锛?026-03-31 23:59:59',
+        inputPlaceholder: '例如：2026-03-31 23:59:59',
         inputPattern: /^$|^\d{4}-\d{2}-\d{2}(?:\s|T)\d{2}:\d{2}:\d{2}$/,
-        inputErrorMessage: '璇疯緭鍏?YYYY-MM-DD HH:mm:ss锛屾垨鐣欑┖'
+        inputErrorMessage: '请输入 YYYY-MM-DD HH:mm:ss，或留空'
       }
     )
   } catch (error) {
@@ -1118,7 +1184,7 @@ async function handleGrantPermission(permissionCode) {
       expiresAt: expiresAt || undefined
     })
     await refreshDetailPermissions()
-    ElMessage.success('閫氱敤鏉冮檺宸叉巿鏉?')
+    ElMessage.success('通用权限已授权')
   } finally {
     permissionLoading.value = false
   }
@@ -1127,23 +1193,71 @@ async function handleGrantPermission(permissionCode) {
 async function handleRevokePermission(permissionCode) {
   const user = detail.value?.user || {}
   if (!canGrantAiPermission(user)) {
-    ElMessage.warning('浠呮敮鎸佹挙閿€鏁欏笀鎴栧鐢熺殑閫氱敤鏉冮檺')
+    ElMessage.warning('仅支持撤销教师或学生的通用权限')
     return
   }
-  await ElMessageBox.confirm('纭鎾ら攢璇ョ敤鎴风殑閫氱敤鏉冮檺鍚楋紵', '鎾ら攢閫氱敤鏉冮檺', { type: 'warning' })
+  await ElMessageBox.confirm('确认撤销该用户的通用权限吗？', '撤销通用权限', { type: 'warning' })
   permissionLoading.value = true
   try {
     await revokeUserPermission(user.id, { permissionCode })
     await refreshDetailPermissions()
-    ElMessage.success('閫氱敤鏉冮檺宸叉挙閿€')
+    ElMessage.success('通用权限已撤销')
   } finally {
     permissionLoading.value = false
   }
 }
-
 function openCreateDialog() {
   resetCreateForm()
   createVisible.value = true
+}
+
+function openEditDialog(row) {
+  editForm.id = row.id
+  editForm.username = row.username
+  editForm.role = row.role
+  editForm.nickname = row.nickname || ''
+  editForm.phone = row.phone || ''
+  editForm.className = row.className || ''
+  editForm.graduationYear = row.graduationYear || 0
+  editVisible.value = true
+}
+
+function validateEditForm() {
+  if (editForm.role === 'student') {
+    if (!editForm.className.trim()) {
+      ElMessage.warning('学生必须填写班级')
+      return false
+    }
+    if (!editForm.graduationYear) {
+      ElMessage.warning('学生必须填写毕业年份')
+      return false
+    }
+  }
+  return true
+}
+
+async function submitEditUser() {
+  if (!validateEditForm()) return
+
+  const payload = {
+    nickname: editForm.nickname.trim(),
+    phone: editForm.phone.trim()
+  }
+
+  if (editForm.role === 'student') {
+    payload.className = editForm.className.trim()
+    payload.graduationYear = editForm.graduationYear
+  }
+
+  editLoading.value = true
+  try {
+    await updateUser(editForm.id, payload)
+    editVisible.value = false
+    await refreshUserView()
+    ElMessage.success('用户信息已更新')
+  } finally {
+    editLoading.value = false
+  }
 }
 
 function openBatchDialog() {

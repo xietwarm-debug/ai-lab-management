@@ -1,4 +1,5 @@
 from . import core as _core
+from .algorithm_nlp import calculate_text_similarity
 
 for _k, _v in _core.__dict__.items():
     if _k.startswith("__"):
@@ -2548,6 +2549,79 @@ def _build_homework_ai_suggestion(submission_row):
     risks = []
     limitations = []
 
+    # ========== 新增：计算作业查重率 ==========
+    plagiarism_rate = None
+    try:
+        # 获取当前任务ID和课程ID
+        task_id = int(row.get("taskId") or 0)
+        course_id = int(row.get("courseId") or 0)
+        student_user_name = str(row.get("studentUserName") or "").strip()
+        
+        if task_id > 0 and course_id > 0 and excerpt:
+            # 查询同一次任务的其他学生作业（排除自己）
+            other_submissions = query(
+                """
+                SELECT s.id, s.file_url AS fileUrl, s.file_name AS fileName, 
+                       s.mime_type AS mimeType, s.student_user_name AS studentUserName
+                FROM experiment_task_submission s
+                WHERE s.task_id = %s 
+                  AND s.course_id = %s
+                  AND s.student_user_name != %s
+                  AND s.status = 'active'
+                  AND s.review_status IN ('pending', 'approved')
+                ORDER BY s.created_at DESC
+                LIMIT 5
+                """,
+                (task_id, course_id, student_user_name)
+            )
+            
+            if other_submissions:
+                # 读取其他学生的作业文本
+                other_texts = []
+                for sub in other_submissions:
+                    other_text = _read_submission_text_excerpt(
+                        sub.get("fileUrl"), 
+                        sub.get("fileName"), 
+                        sub.get("mimeType")
+                    )
+                    if other_text and len(other_text) > 50:  # 至少50字符才有比对意义
+                        other_texts.append(other_text)
+                
+                # 计算与每个其他学生作业的相似度，取最高值
+                if other_texts:
+                    max_similarity = 0.0
+                    most_similar_student = ""
+                    
+                    for idx, other_text in enumerate(other_texts):
+                        similarity = calculate_text_similarity(excerpt, other_text)
+                        if similarity > max_similarity:
+                            max_similarity = similarity
+                            most_similar_student = str(other_submissions[idx].get("studentUserName") or "")
+                    
+                    plagiarism_rate = max_similarity
+                    
+                    # 根据查重率调整分数和风险提示
+                    if plagiarism_rate > 80:
+                        score -= 30
+                        risks.append(f"⚠️ 算法检测到高相似度（{plagiarism_rate}%），疑似抄袭！")
+                        if most_similar_student:
+                            risks.append(f"与用户 {most_similar_student} 的作业高度相似。")
+                    elif plagiarism_rate > 60:
+                        score -= 15
+                        risks.append(f"⚡ 算法检测到中等相似度（{plagiarism_rate}%），建议人工复核。")
+                    elif plagiarism_rate > 40:
+                        score -= 5
+                        signals.append(f"📊 算法检测到一定相似度（{plagiarism_rate}%），可能参考了他人作业。")
+                    else:
+                        signals.append(f"✅ 算法检测原创度高（相似度仅 {plagiarism_rate}%）。")
+            else:
+                limitations.append("暂无其他同学作业可供比对，未进行查重检测。")
+        else:
+            limitations.append("缺少必要信息（任务/课程/正文），未进行查重检测。")
+    except Exception as e:
+        limitations.append(f"查重算法执行异常：{str(e)[:100]}")
+    # ==========================================
+
     if deadline_dt:
         if delay_hours <= 0:
             signals.append("按截止时间看，本次提交是按时完成的。")
@@ -2601,6 +2675,12 @@ def _build_homework_ai_suggestion(submission_row):
             note_parts.append("从可读正文和文件体量看，提交内容具备基本完整性。")
         elif not excerpt:
             note_parts.append("因无法直接解析正文，请老师打开文件做最终确认。")
+        # 新增：查重提示
+        if plagiarism_rate is not None:
+            if plagiarism_rate > 60:
+                note_parts.append(f"⚠️ 查重率较高（{plagiarism_rate}%），请务必人工复核是否存在抄袭。")
+            elif plagiarism_rate > 40:
+                note_parts.append(f"📊 查重率为 {plagiarism_rate}%，建议关注内容原创性。")
     else:
         note_parts = ["AI 初审建议先驳回或要求补充。"]
         if delay_hours > 0:
@@ -2611,11 +2691,26 @@ def _build_homework_ai_suggestion(submission_row):
             note_parts.append("可读正文过短，建议补充实验过程与结果。")
         if not excerpt:
             note_parts.append("当前无法解析正文，建议人工核验后再决定。")
+        # 新增：查重提示
+        if plagiarism_rate is not None and plagiarism_rate > 60:
+            note_parts.append(f"⚠️ 查重率高达 {plagiarism_rate}%，疑似严重抄袭！")
 
     summary = (
         f"建议{('通过' if suggested_status == 'approved' else '驳回')}，"
         f"建议分数 {score} 分。"
     )
+    
+    # 新增：将查重率添加到返回数据中
+    metrics = {
+        "fileSize": file_size,
+        "charCount": char_count,
+        "lineCount": line_count,
+        "delayHours": delay_hours,
+        "hasTextExcerpt": bool(excerpt),
+    }
+    if plagiarism_rate is not None:
+        metrics["plagiarismRate"] = plagiarism_rate
+    
     return {
         "suggestedStatus": suggested_status,
         "suggestedScore": score,
@@ -2624,13 +2719,7 @@ def _build_homework_ai_suggestion(submission_row):
         "signals": signals[:5],
         "risks": risks[:5],
         "limitations": limitations[:3],
-        "metrics": {
-            "fileSize": file_size,
-            "charCount": char_count,
-            "lineCount": line_count,
-            "delayHours": delay_hours,
-            "hasTextExcerpt": bool(excerpt),
-        },
+        "metrics": metrics,
     }
 
 

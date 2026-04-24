@@ -8,3 +8,10 @@ export function getAuditLogs(params = {}) {
 export function getAuditExportUrl(params = {}) {
   return buildApiUrl('/audit-logs/export', params)
 }
+
+export function explainAuditLogsAi(payload = {}) {
+  return request.post('/admin/audit-logs/ai-explain', payload, {
+    timeout: 45000,
+    silentError: true
+  })
+}

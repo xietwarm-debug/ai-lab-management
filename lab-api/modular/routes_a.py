@@ -5969,6 +5969,151 @@ def export_audit_logs():
     )
 
 
+def _normalize_audit_ai_filters(payload):
+    row = payload if isinstance(payload, dict) else {}
+    return {
+        "action": str(row.get("action") or "").strip(),
+        "operator": str(row.get("operator") or "").strip(),
+        "targetType": str(row.get("targetType") or "").strip(),
+        "startDate": str(row.get("startDate") or "").strip(),
+        "endDate": str(row.get("endDate") or "").strip(),
+    }
+
+
+def _normalize_audit_ai_logs(payload_rows):
+    rows = payload_rows if isinstance(payload_rows, list) else []
+    normalized = []
+    for row in rows[:50]:
+        item = row if isinstance(row, dict) else {}
+        detail = item.get("detail")
+        if isinstance(detail, (dict, list)):
+            try:
+                detail_text = json.dumps(detail, ensure_ascii=False)
+            except Exception:
+                detail_text = str(detail)
+        else:
+            detail_text = str(detail or "").strip()
+        normalized.append(
+            {
+                "id": _to_int_or_none(item.get("id")) or 0,
+                "createdAt": str(item.get("createdAt") or "").strip(),
+                "action": str(item.get("action") or "").strip(),
+                "operatorId": _to_int_or_none(item.get("operatorId")),
+                "operatorName": str(item.get("operatorName") or "").strip(),
+                "operatorRole": str(item.get("operatorRole") or "").strip(),
+                "targetType": str(item.get("targetType") or "").strip(),
+                "targetId": str(item.get("targetId") or "").strip(),
+                "ip": str(item.get("ip") or "").strip(),
+                "detailText": detail_text[:1500],
+            }
+        )
+
+    normalized = [row for row in normalized if row.get("id") or row.get("action") or row.get("detailText")]
+    if not normalized:
+        raise BizError("audit logs required", 400)
+    return normalized
+
+
+def _build_audit_logs_ai_prompt(logs, filters):
+    filter_payload = _normalize_audit_ai_filters(filters)
+    brief_rows = []
+    for item in logs:
+        brief_rows.append(
+            {
+                "id": int(item.get("id") or 0),
+                "createdAt": str(item.get("createdAt") or "").strip(),
+                "action": str(item.get("action") or "").strip(),
+                "operatorName": str(item.get("operatorName") or "").strip(),
+                "operatorRole": str(item.get("operatorRole") or "").strip(),
+                "targetType": str(item.get("targetType") or "").strip(),
+                "targetId": str(item.get("targetId") or "").strip(),
+                "ip": str(item.get("ip") or "").strip(),
+                "detail": str(item.get("detailText") or "").strip(),
+            }
+        )
+    return "\n".join(
+        [
+            "你是高校实验室管理系统的审计日志解释助手。",
+            "请用简体中文解释下面这些审计日志都是什么意思。",
+            "要求：",
+            "1. 先给出整体概览。",
+            "2. 再逐条解释每条日志代表的操作、影响对象和可能业务含义。",
+            "3. 明确指出哪些日志正常，哪些日志需要关注或复核。",
+            "4. 最后给出管理员建议。",
+            "5. 不要把日志误判成预约请求或实验室查询，不要要求用户补充实验室信息。",
+            f"当前筛选条件：{json.dumps(filter_payload, ensure_ascii=False)}",
+            f"待解释日志数量：{len(brief_rows)}",
+            "审计日志数据：",
+            json.dumps(brief_rows, ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+@app.post("/admin/audit-logs/ai-explain")
+@auth_required(roles=["admin"], permissions=[PERMISSION_AUDIT_VIEWER])
+def admin_audit_logs_ai_explain():
+    payload = request.get_json(force=True) or {}
+    logs = _normalize_audit_ai_logs(payload.get("logs"))
+    filters = _normalize_audit_ai_filters(payload.get("filters"))
+    prompt = _build_audit_logs_ai_prompt(logs, filters)
+    reply = _call_siliconflow_chat(
+        [
+            {
+                "role": "system",
+                "content": "你是审计日志解释助手。请只根据给定日志解释其含义、风险和建议，输出简洁清晰的中文说明。",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+    )
+    reply_text = str(reply or "").strip()
+    if not reply_text:
+        raise BizError("audit ai empty response", 502)
+
+    current_user = g.current_user or {}
+    user_name = str(current_user.get("username") or "").strip()
+    if user_name:
+        try:
+            _agent_pending_clear(user_name, reason="audit_logs_ai_explain")
+        except Exception:
+            pass
+        try:
+            save_agent_chat_message(
+                user_name,
+                "user",
+                f"请解释我从审计日志页选中的 {len(logs)} 条日志",
+                action="audit_logs_explain_request",
+                meta={"source": "audit_logs", "selectedCount": len(logs), "filters": filters},
+            )
+            save_agent_chat_message(
+                user_name,
+                "assistant",
+                reply_text,
+                action="audit_logs_explain",
+                meta={"source": "audit-ai", "selectedCount": len(logs), "model": SILICONFLOW_MODEL},
+            )
+        except Exception:
+            pass
+
+    audit_log(
+        "admin.audit_logs.ai_explain",
+        target_type="audit_log",
+        detail={"selectedCount": len(logs), "filters": filters, "model": SILICONFLOW_MODEL},
+        actor={"id": current_user.get("id"), "username": current_user.get("username"), "role": current_user.get("role")},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "reply": reply_text,
+                "selectedCount": len(logs),
+                "source": "audit-ai",
+                "model": SILICONFLOW_MODEL,
+            },
+        }
+    )
+
+
 @app.post("/users/<int:uid>/promote")
 @auth_required(roles=["admin"])
 def promote_user(uid):
@@ -6122,6 +6267,80 @@ def reset_user_password(uid):
             },
         }
     )
+
+
+@app.put("/users/<int:uid>")
+@auth_required(roles=["admin"])
+def update_user(uid):
+    """更新用户基本信息（昵称、手机号、班级、毕业年份）"""
+    data = request.get_json(force=True) or {}
+    
+    target = _query_admin_user_row(uid)
+    if not target:
+        raise BizError("user not found", 404)
+    
+    current_user = g.current_user or {}
+    _assert_user_editable(target, current_user, block_self=True)
+    
+    # 只允许更新这些字段
+    allowed_fields = {
+        "nickname": str(data.get("nickname") or "").strip(),
+        "phone": str(data.get("phone") or "").strip(),
+    }
+    
+    # 学生可以更新班级和毕业年份
+    if str(target.get("role") or "").strip() == "student":
+        allowed_fields["className"] = str(data.get("className") or "").strip()
+        graduation_year = data.get("graduationYear")
+        if graduation_year is not None:
+            try:
+                allowed_fields["graduationYear"] = int(graduation_year)
+            except (ValueError, TypeError):
+                raise BizError("invalid graduationYear", 400)
+        else:
+            allowed_fields["graduationYear"] = target.get("graduationYear") or 0
+    
+    # 构建更新语句
+    set_clauses = []
+    values = []
+    for field, value in allowed_fields.items():
+        db_field = field
+        if field == "className":
+            db_field = "class_name"
+        elif field == "graduationYear":
+            db_field = "graduation_year"
+        set_clauses.append(f"{db_field}=%s")
+        values.append(value)
+    
+    if not set_clauses:
+        return jsonify({"ok": True, "data": {"id": int(uid), "changed": False}})
+    
+    values.append(uid)
+    execute(f"UPDATE user SET {', '.join(set_clauses)} WHERE id=%s", tuple(values))
+    
+    audit_log(
+        "admin.user.update",
+        target_type="user",
+        target_id=uid,
+        detail={
+            "targetUsername": str(target.get("username") or "").strip(),
+            "updatedFields": list(allowed_fields.keys()),
+        },
+        actor={
+            "id": current_user.get("id"),
+            "username": current_user.get("username"),
+            "role": current_user.get("role"),
+        },
+    )
+    
+    updated = _query_admin_user_row(uid)
+    return jsonify({
+        "ok": True,
+        "data": {
+            "user": _format_user_admin_row(updated),
+            "changed": True,
+        },
+    })
 
 
 def _normalize_admin_create_user_payload(payload):

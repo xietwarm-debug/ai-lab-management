@@ -22,6 +22,12 @@ from urllib.error import HTTPError, URLError
 from flask import g
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import HTTPException
+try:
+    import chromadb
+    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+except Exception:
+    chromadb = None
+    SentenceTransformerEmbeddingFunction = None
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
@@ -56,6 +62,11 @@ def env_int(key, default):
         return int(os.getenv(key, str(default)))
     except (TypeError, ValueError):
         return int(default)
+
+
+def env_bool(key, default=False):
+    fallback = "1" if bool(default) else "0"
+    return str(os.getenv(key, fallback) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 load_local_env()
@@ -143,12 +154,22 @@ OPEN_METEO_TIMEOUT_SECONDS = env_int("OPEN_METEO_TIMEOUT_SECONDS", 12)
 KNOWLEDGE_CHUNK_CHAR_LIMIT = max(200, min(1200, env_int("KNOWLEDGE_CHUNK_CHAR_LIMIT", 420)))
 KNOWLEDGE_CHUNK_OVERLAP = max(20, min(200, env_int("KNOWLEDGE_CHUNK_OVERLAP", 60)))
 KNOWLEDGE_SEARCH_TOP_K = max(1, min(8, env_int("KNOWLEDGE_SEARCH_TOP_K", 4)))
+KNOWLEDGE_VECTOR_ENABLED = env_bool("KNOWLEDGE_VECTOR_ENABLED", True)
+KNOWLEDGE_VECTOR_TOP_K = max(2, min(16, env_int("KNOWLEDGE_VECTOR_TOP_K", 8)))
+CHROMA_PERSIST_DIR = os.path.join(BASE_DIR, str(os.getenv("CHROMA_PERSIST_DIR", "uploads/chroma") or "uploads/chroma").strip())
+CHROMA_COLLECTION_NAME = str(os.getenv("CHROMA_COLLECTION_NAME", "knowledge_chunks") or "knowledge_chunks").strip() or "knowledge_chunks"
+CHROMA_EMBEDDING_MODEL = str(
+    os.getenv("CHROMA_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+    or "paraphrase-multilingual-MiniLM-L12-v2"
+).strip()
 KNOWLEDGE_SCOPE_ROLE_SET = {"all", "student", "teacher", "admin"}
 KNOWLEDGE_CATEGORY_SET = {"rule", "manual", "safety", "course", "repair", "faq", "other"}
 _RATE_LIMIT_BUCKETS = {}
 _RATE_LIMIT_LOCK = Lock()
 _RESERVATION_RULE_LOCK = Lock()
 _RESERVATION_RULE_CACHE = {"expireAt": 0.0, "payload": None}
+_KNOWLEDGE_VECTOR_LOCK = Lock()
+_KNOWLEDGE_VECTOR_STATE = {"client": None, "collection": None, "embedding": None, "lastError": "", "ready": False}
 AGENT_PENDING_TTL_SECONDS = max(60, env_int("AGENT_PENDING_TTL_SECONDS", 600))
 _AGENT_PENDING_LOCK = Lock()
 _AGENT_PENDING_CONTEXT = {}
@@ -3513,6 +3534,121 @@ def _knowledge_split_text(content, title=""):
     return chunks
 
 
+def _knowledge_vector_chunk_id(document_id, chunk_no):
+    return f"doc-{int(document_id)}-chunk-{int(chunk_no)}"
+
+
+def _get_knowledge_vector_collection():
+    if not KNOWLEDGE_VECTOR_ENABLED:
+        return None
+    with _KNOWLEDGE_VECTOR_LOCK:
+        if _KNOWLEDGE_VECTOR_STATE.get("ready") and _KNOWLEDGE_VECTOR_STATE.get("collection") is not None:
+            return _KNOWLEDGE_VECTOR_STATE.get("collection")
+        try:
+            if chromadb is None or SentenceTransformerEmbeddingFunction is None:
+                raise RuntimeError("chromadb or sentence-transformers is not installed")
+            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+            embedding_fn = SentenceTransformerEmbeddingFunction(model_name=CHROMA_EMBEDDING_MODEL)
+            client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
+            collection = client.get_or_create_collection(
+                name=CHROMA_COLLECTION_NAME,
+                embedding_function=embedding_fn,
+            )
+            _KNOWLEDGE_VECTOR_STATE.update(
+                {
+                    "client": client,
+                    "collection": collection,
+                    "embedding": embedding_fn,
+                    "lastError": "",
+                    "ready": True,
+                }
+            )
+            return collection
+        except Exception as e:
+            message = str(e or "unknown error")
+            if message != _KNOWLEDGE_VECTOR_STATE.get("lastError"):
+                print(f"[warn] knowledge vector retrieval disabled: {message}")
+            _KNOWLEDGE_VECTOR_STATE.update(
+                {"client": None, "collection": None, "embedding": None, "lastError": message, "ready": False}
+            )
+            return None
+
+
+def _sync_knowledge_document_vector_index(document_id):
+    collection = _get_knowledge_vector_collection()
+    if collection is None:
+        return {
+            "enabled": False,
+            "indexed": 0,
+            "collection": CHROMA_COLLECTION_NAME,
+            "error": str(_KNOWLEDGE_VECTOR_STATE.get("lastError") or "").strip(),
+        }
+
+    rows = query(
+        """
+        SELECT kc.document_id AS documentId,
+               kc.chunk_no AS chunkNo,
+               kc.section_title AS sectionTitle,
+               kc.chunk_text AS chunkText,
+               kc.keywords AS chunkKeywords,
+               kd.title,
+               kd.category,
+               kd.scope_role AS scopeRole,
+               kd.status
+        FROM knowledge_chunk kc
+        INNER JOIN knowledge_document kd ON kd.id=kc.document_id
+        WHERE kc.document_id=%s
+        ORDER BY kc.chunk_no ASC
+        """,
+        (int(document_id),),
+    )
+
+    try:
+        collection.delete(where={"documentId": int(document_id)})
+    except Exception as e:
+        return {
+            "enabled": True,
+            "indexed": 0,
+            "collection": CHROMA_COLLECTION_NAME,
+            "error": f"delete failed: {e}",
+        }
+
+    if not rows:
+        return {"enabled": True, "indexed": 0, "collection": CHROMA_COLLECTION_NAME}
+
+    ids = []
+    documents = []
+    metadatas = []
+    for row in rows or []:
+        doc_id = int(row.get("documentId") or 0)
+        chunk_no = int(row.get("chunkNo") or 0)
+        ids.append(_knowledge_vector_chunk_id(doc_id, chunk_no))
+        documents.append(str(row.get("chunkText") or "").strip())
+        metadatas.append(
+            {
+                "documentId": doc_id,
+                "chunkNo": chunk_no,
+                "title": str(row.get("title") or "").strip()[:200],
+                "category": str(row.get("category") or "").strip()[:32],
+                "scopeRole": str(row.get("scopeRole") or "").strip()[:16],
+                "status": str(row.get("status") or "").strip()[:16],
+                "sectionTitle": str(row.get("sectionTitle") or "").strip()[:200],
+                "keywords": str(row.get("chunkKeywords") or "").strip()[:500],
+            }
+        )
+
+    try:
+        collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        return {"enabled": True, "indexed": len(ids), "collection": CHROMA_COLLECTION_NAME}
+    except Exception as e:
+        return {
+            "enabled": True,
+            "indexed": 0,
+            "collection": CHROMA_COLLECTION_NAME,
+            "error": f"upsert failed: {e}",
+        }
+
+
 def rebuild_knowledge_document_chunks(document_id):
     rows = query(
         """
@@ -3576,10 +3712,21 @@ def rebuild_knowledge_document_chunks(document_id):
         )
         return {"documentId": int(document_id), "chunkCount": len(chunks), "summary": summary}
 
-    return run_in_transaction(_tx)
+    result = run_in_transaction(_tx)
+    vector_result = _sync_knowledge_document_vector_index(document_id)
+    result["vectorIndex"] = vector_result
+    return result
 
 
-def search_knowledge_chunks(query_text, current_role="", limit=None):
+def _knowledge_scope_roles_for_search(current_role=""):
+    scope_roles = ["all"]
+    role = str(current_role or "").strip().lower()
+    if role and role in KNOWLEDGE_SCOPE_ROLE_SET and role != "all":
+        scope_roles.append(role)
+    return scope_roles
+
+
+def _search_knowledge_chunks_keyword(query_text, current_role="", limit=None):
     query_raw = re.sub(r"\s+", " ", str(query_text or "").strip())
     if not query_raw:
         return []
@@ -3587,10 +3734,7 @@ def search_knowledge_chunks(query_text, current_role="", limit=None):
     if not query_tokens:
         return []
     top_k = max(1, min(8, int(limit or KNOWLEDGE_SEARCH_TOP_K)))
-    scope_roles = ["all"]
-    role = str(current_role or "").strip().lower()
-    if role and role in KNOWLEDGE_SCOPE_ROLE_SET and role != "all":
-        scope_roles.append(role)
+    scope_roles = _knowledge_scope_roles_for_search(current_role=current_role)
     placeholders = ",".join(["%s"] * len(scope_roles))
     rows = query(
         f"""
@@ -3643,9 +3787,190 @@ def search_knowledge_chunks(query_text, current_role="", limit=None):
         item = dict(row)
         item["score"] = round(score, 4)
         item["overlapTokens"] = overlap[:8]
+        item["matchStrategy"] = "keyword"
         scored.append(item)
     scored.sort(key=lambda x: (-float(x.get("score") or 0), int(x.get("documentId") or 0), int(x.get("chunkNo") or 0)))
     return scored[:top_k]
+
+
+def _query_knowledge_rows_by_pairs(pairs, current_role=""):
+    normalized_pairs = []
+    seen = set()
+    for pair in pairs or []:
+        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            continue
+        try:
+            key = (int(pair[0] or 0), int(pair[1] or 0))
+        except (TypeError, ValueError):
+            continue
+        if key[0] <= 0 or key[1] <= 0 or key in seen:
+            continue
+        seen.add(key)
+        normalized_pairs.append(key)
+    if not normalized_pairs:
+        return []
+
+    scope_roles = _knowledge_scope_roles_for_search(current_role=current_role)
+    scope_placeholders = ",".join(["%s"] * len(scope_roles))
+    pair_sql = " OR ".join(["(kc.document_id=%s AND kc.chunk_no=%s)"] * len(normalized_pairs))
+    params = list(scope_roles)
+    for document_id, chunk_no in normalized_pairs:
+        params.extend([document_id, chunk_no])
+    return query(
+        f"""
+        SELECT kc.id,
+               kc.document_id AS documentId,
+               kc.chunk_no AS chunkNo,
+               kc.section_title AS sectionTitle,
+               kc.chunk_text AS chunkText,
+               kc.keywords AS chunkKeywords,
+               kd.title,
+               kd.category,
+               kd.scope_role AS scopeRole,
+               kd.summary
+        FROM knowledge_chunk kc
+        INNER JOIN knowledge_document kd ON kd.id=kc.document_id
+        WHERE kd.status='active'
+          AND kd.scope_role IN ({scope_placeholders})
+          AND ({pair_sql})
+        ORDER BY kd.updated_at DESC, kc.document_id DESC, kc.chunk_no ASC
+        """,
+        tuple(params),
+    )
+
+
+def _search_knowledge_chunks_vector(query_text, current_role="", limit=None):
+    query_raw = re.sub(r"\s+", " ", str(query_text or "").strip())
+    if not query_raw:
+        return []
+    collection = _get_knowledge_vector_collection()
+    if collection is None:
+        return []
+
+    top_k = max(2, min(16, int(limit or KNOWLEDGE_VECTOR_TOP_K)))
+    try:
+        result = collection.query(
+            query_texts=[query_raw],
+            n_results=max(top_k * 4, 12),
+            include=["metadatas", "distances"],
+        )
+    except Exception as e:
+        print(f"[warn] knowledge vector query failed: {e}")
+        return []
+    raw_metadatas = ((result or {}).get("metadatas") or [[]])[0] or []
+    raw_distances = ((result or {}).get("distances") or [[]])[0] or []
+    rank_map = {}
+    for idx, meta in enumerate(raw_metadatas, start=1):
+        item = meta if isinstance(meta, dict) else {}
+        try:
+            document_id = int(item.get("documentId") or 0)
+            chunk_no = int(item.get("chunkNo") or 0)
+        except (TypeError, ValueError):
+            continue
+        if document_id <= 0 or chunk_no <= 0:
+            continue
+        distance = raw_distances[idx - 1] if idx - 1 < len(raw_distances) else None
+        try:
+            distance_value = float(distance)
+        except (TypeError, ValueError):
+            distance_value = None
+        if distance_value is not None and distance_value >= 1.3:
+            continue
+        rank_map[(document_id, chunk_no)] = {"rank": idx, "distance": distance_value}
+
+    rows = _query_knowledge_rows_by_pairs(rank_map.keys(), current_role=current_role)
+    items = []
+    for row in rows or []:
+        key = (int(row.get("documentId") or 0), int(row.get("chunkNo") or 0))
+        meta = rank_map.get(key) or {}
+        distance_value = meta.get("distance")
+        rank = int(meta.get("rank") or 999)
+        distance_bonus = 0.0
+        if distance_value is None:
+            distance_bonus = 0.8
+        else:
+            distance_bonus = max(0.0, (1.25 - min(1.25, float(distance_value))) * 3.0)
+        rank_bonus = max(0.0, 1.2 - (max(1, rank) - 1) * 0.12)
+        score = round(distance_bonus + rank_bonus, 4)
+        if score <= 0:
+            continue
+        item = dict(row)
+        item["score"] = score
+        item["vectorDistance"] = distance_value
+        item["vectorRank"] = rank
+        item["overlapTokens"] = []
+        item["matchStrategy"] = "vector"
+        items.append(item)
+    items.sort(
+        key=lambda x: (
+            float(x.get("vectorDistance") if x.get("vectorDistance") is not None else 999.0),
+            int(x.get("documentId") or 0),
+            int(x.get("chunkNo") or 0),
+        )
+    )
+    return items[:top_k]
+
+
+def _merge_knowledge_hits(keyword_hits, vector_hits, top_k):
+    merged = {}
+    appearance_order = []
+
+    def _ensure_entry(item):
+        key = (int(item.get("documentId") or 0), int(item.get("chunkNo") or 0))
+        if key not in merged:
+            merged[key] = dict(item)
+            merged[key]["keywordScore"] = 0.0
+            merged[key]["vectorScore"] = 0.0
+            merged[key]["matchStrategies"] = []
+            merged[key]["overlapTokens"] = list(item.get("overlapTokens") or [])
+            appearance_order.append(key)
+        return merged[key]
+
+    for item in keyword_hits or []:
+        entry = _ensure_entry(item)
+        entry["keywordScore"] = max(float(entry.get("keywordScore") or 0), float(item.get("score") or 0))
+        entry["score"] = max(float(entry.get("score") or 0), float(item.get("score") or 0))
+        if "keyword" not in entry["matchStrategies"]:
+            entry["matchStrategies"].append("keyword")
+        overlap_tokens = list(entry.get("overlapTokens") or [])
+        for token in list(item.get("overlapTokens") or []):
+            token_text = str(token or "").strip()
+            if token_text and token_text not in overlap_tokens:
+                overlap_tokens.append(token_text)
+        entry["overlapTokens"] = overlap_tokens[:8]
+
+    for item in vector_hits or []:
+        entry = _ensure_entry(item)
+        vector_score = float(item.get("score") or 0)
+        entry["vectorScore"] = max(float(entry.get("vectorScore") or 0), vector_score)
+        entry["vectorDistance"] = item.get("vectorDistance")
+        entry["vectorRank"] = item.get("vectorRank")
+        boosted = max(float(entry.get("score") or 0), vector_score)
+        if float(entry.get("keywordScore") or 0) > 0 and vector_score > 0:
+            boosted = max(boosted, float(entry.get("keywordScore") or 0) + vector_score * 0.65 + 0.6)
+        entry["score"] = round(boosted, 4)
+        if "vector" not in entry["matchStrategies"]:
+            entry["matchStrategies"].append("vector")
+
+    ranked = list(merged.values())
+    ranked.sort(
+        key=lambda x: (
+            -float(x.get("score") or 0),
+            -float(x.get("keywordScore") or 0),
+            float(x.get("vectorDistance") if x.get("vectorDistance") is not None else 999.0),
+            appearance_order.index((int(x.get("documentId") or 0), int(x.get("chunkNo") or 0))),
+        )
+    )
+    return ranked[: max(1, min(8, int(top_k or KNOWLEDGE_SEARCH_TOP_K)))]
+
+
+def search_knowledge_chunks(query_text, current_role="", limit=None):
+    top_k = max(1, min(8, int(limit or KNOWLEDGE_SEARCH_TOP_K)))
+    keyword_hits = _search_knowledge_chunks_keyword(query_text, current_role=current_role, limit=max(top_k, 6))
+    vector_hits = _search_knowledge_chunks_vector(query_text, current_role=current_role, limit=max(top_k, 6))
+    if vector_hits:
+        return _merge_knowledge_hits(keyword_hits, vector_hits, top_k=top_k)
+    return keyword_hits[:top_k]
 
 
 def _build_knowledge_sources(hits):
@@ -4139,6 +4464,8 @@ def list_equipment_failure_predictions(limit=8, horizon_days=30, auto_refresh=Tr
                    e.status,
                    e.lab_id AS labId,
                    e.lab_name AS labName,
+                   e.warehouse_id AS warehouseId,
+                   e.warehouse_name AS warehouseName,
                    s.repair_count_7d AS repairCount7d,
                    s.repair_count_30d AS repairCount30d,
                    s.repair_count_90d AS repairCount90d,
@@ -4180,6 +4507,8 @@ def list_equipment_failure_predictions(limit=8, horizon_days=30, auto_refresh=Tr
                 "status": str(row.get("status") or "").strip(),
                 "labId": _to_int_or_none(row.get("labId")),
                 "labName": str(row.get("labName") or "").strip(),
+                "warehouseId": _to_int_or_none(row.get("warehouseId")),
+                "warehouseName": str(row.get("warehouseName") or "").strip(),
                 "predictDate": str(row.get("predictDate") or "").strip(),
                 "horizonDays": int(row.get("horizonDays") or target_horizon),
                 "riskScore": round(float(row.get("riskScore") or 0), 2),
@@ -4216,6 +4545,18 @@ def _asset_basic_status_label(status):
 
 def _serialize_basic_asset_row(row):
     item = row or {}
+    warehouse_name = str(item.get("warehouseName") or "").strip()
+    lab_name = str(item.get("labName") or "").strip()
+    location_note = str(item.get("locationNote") or "").strip()
+    location_type = "warehouse" if warehouse_name else ("lab" if lab_name else "")
+    if warehouse_name:
+        location_text = f"仓库：{warehouse_name}"
+    elif lab_name:
+        location_text = f"实验室：{lab_name}"
+    else:
+        location_text = "未登记具体位置"
+    if location_note and location_note not in location_text:
+        location_text = f"{location_text}（备注：{location_note}）"
     return {
         "id": int(item.get("id") or 0),
         "assetCode": str(item.get("assetCode") or "").strip(),
@@ -4223,7 +4564,11 @@ def _serialize_basic_asset_row(row):
         "model": str(item.get("model") or "").strip(),
         "brand": str(item.get("brand") or "").strip(),
         "labId": _to_int_or_none(item.get("labId")),
-        "labName": str(item.get("labName") or "").strip(),
+        "labName": lab_name,
+        "warehouseId": _to_int_or_none(item.get("warehouseId")),
+        "warehouseName": warehouse_name,
+        "locationType": location_type,
+        "locationText": location_text,
         "status": str(item.get("status") or "").strip(),
         "statusLabel": _asset_basic_status_label(item.get("status")),
         "allowBorrow": bool(int(item.get("allowBorrow") or 0)),
@@ -4231,10 +4576,142 @@ def _serialize_basic_asset_row(row):
         "borrowStatusText": "已借出" if bool(int(item.get("isBorrowed") or 0)) else "在库",
         "nextMaintenanceAt": _to_text_time(item.get("nextMaintenanceAt")),
         "warrantyUntil": _to_text_time(item.get("warrantyUntil")),
-        "locationNote": str(item.get("locationNote") or "").strip(),
+        "locationNote": location_note,
         "purchaseDate": _to_text_time(item.get("purchaseDate")),
         "updatedAt": _to_text_time(item.get("updatedAt")),
     }
+
+
+def _extract_warehouse_name_from_text(text):
+    raw = str(text or "").strip()
+    compact = re.sub(r"\s+", "", raw)
+    if not compact or "仓库" not in compact:
+        return ""
+
+    rows = query(
+        """
+        SELECT name
+        FROM warehouse
+        ORDER BY CHAR_LENGTH(name) DESC, id DESC
+        LIMIT 200
+        """
+    )
+    for row in rows or []:
+        name = str((row or {}).get("name") or "").strip()
+        if name and name in raw:
+            return name
+
+    match = re.search(r"([A-Za-z0-9_\-\u4e00-\u9fa5]{1,30}仓库)", raw)
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def find_basic_warehouse_by_name(name):
+    text = str(name or "").strip()
+    if not text:
+        return None
+    rows = query(
+        """
+        SELECT w.id,
+               w.name,
+               w.location,
+               w.manager_name AS managerName,
+               w.status,
+               w.description,
+               (
+                   SELECT COUNT(1)
+                   FROM equipment e
+                   WHERE e.warehouse_id = w.id
+                     AND e.status != 'scrapped'
+               ) AS assetCount
+        FROM warehouse w
+        WHERE w.name=%s
+        LIMIT 1
+        """,
+        (text,),
+    )
+    if not rows:
+        rows = query(
+            """
+            SELECT w.id,
+                   w.name,
+                   w.location,
+                   w.manager_name AS managerName,
+                   w.status,
+                   w.description,
+                   (
+                       SELECT COUNT(1)
+                       FROM equipment e
+                       WHERE e.warehouse_id = w.id
+                         AND e.status != 'scrapped'
+                   ) AS assetCount
+            FROM warehouse w
+            WHERE w.name LIKE %s
+            ORDER BY CHAR_LENGTH(w.name) ASC, w.id DESC
+            LIMIT 1
+            """,
+            (f"%{text}%",),
+        )
+    if not rows:
+        return None
+    row = rows[0] or {}
+    return {
+        "id": int(row.get("id") or 0),
+        "name": str(row.get("name") or "").strip(),
+        "location": str(row.get("location") or "").strip(),
+        "managerName": str(row.get("managerName") or "").strip(),
+        "status": str(row.get("status") or "").strip(),
+        "description": str(row.get("description") or "").strip(),
+        "assetCount": int(row.get("assetCount") or 0),
+    }
+
+
+def list_basic_warehouse_records(keyword="", limit=10):
+    keyword_text = str(keyword or "").strip()
+    size_num = max(1, min(int(limit or 10), 50))
+    where_sql = " WHERE 1=1"
+    params = []
+    if keyword_text:
+        where_sql += " AND (w.name LIKE %s OR w.location LIKE %s OR w.description LIKE %s)"
+        kw = f"%{keyword_text}%"
+        params.extend([kw, kw, kw])
+
+    rows = query(
+        """
+        SELECT w.id,
+               w.name,
+               w.location,
+               w.manager_name AS managerName,
+               w.status,
+               w.description,
+               (
+                   SELECT COUNT(1)
+                   FROM equipment e
+                   WHERE e.warehouse_id = w.id
+                     AND e.status != 'scrapped'
+               ) AS assetCount
+        FROM warehouse w
+        """
+        + where_sql
+        + """
+        ORDER BY w.id DESC
+        LIMIT %s
+        """,
+        tuple(list(params) + [size_num]),
+    )
+    items = []
+    for row in rows or []:
+        items.append(
+            {
+                "id": int(row.get("id") or 0),
+                "name": str(row.get("name") or "").strip(),
+                "location": str(row.get("location") or "").strip(),
+                "managerName": str(row.get("managerName") or "").strip(),
+                "status": str(row.get("status") or "").strip(),
+                "description": str(row.get("description") or "").strip(),
+                "assetCount": int(row.get("assetCount") or 0),
+            }
+        )
+    return items
 
 
 def find_basic_asset_by_code(asset_code):
@@ -4250,6 +4727,8 @@ def find_basic_asset_by_code(asset_code):
                brand,
                lab_id AS labId,
                lab_name AS labName,
+               warehouse_id AS warehouseId,
+               warehouse_name AS warehouseName,
                status,
                allow_borrow AS allowBorrow,
                is_borrowed AS isBorrowed,
@@ -4272,6 +4751,7 @@ def find_basic_asset_by_code(asset_code):
 def list_basic_asset_records(
     keyword="",
     lab_name="",
+    warehouse_name="",
     status="",
     is_borrowed=None,
     maintenance_due_days=None,
@@ -4281,6 +4761,7 @@ def list_basic_asset_records(
 ):
     keyword_text = str(keyword or "").strip()
     lab_name_text = str(lab_name or "").strip()
+    warehouse_name_text = str(warehouse_name or "").strip()
     status_text = str(status or "").strip().lower()
     page_num = max(1, int(page or 1))
     size_num = max(1, min(int(page_size or 20), 100))
@@ -4297,14 +4778,18 @@ def list_basic_asset_records(
                 OR model LIKE %s
                 OR brand LIKE %s
                 OR lab_name LIKE %s
+                OR warehouse_name LIKE %s
                 OR location_note LIKE %s
             )
         """
         kw = f"%{keyword_text}%"
-        params.extend([kw, kw, kw, kw, kw, kw])
+        params.extend([kw, kw, kw, kw, kw, kw, kw])
     if lab_name_text:
         where_sql += " AND lab_name LIKE %s"
         params.append(f"%{lab_name_text}%")
+    if warehouse_name_text:
+        where_sql += " AND warehouse_name LIKE %s"
+        params.append(f"%{warehouse_name_text}%")
     if status_text:
         where_sql += " AND status=%s"
         params.append(status_text)
@@ -4331,6 +4816,8 @@ def list_basic_asset_records(
                brand,
                lab_id AS labId,
                lab_name AS labName,
+               warehouse_id AS warehouseId,
+               warehouse_name AS warehouseName,
                status,
                allow_borrow AS allowBorrow,
                is_borrowed AS isBorrowed,
@@ -4364,10 +4851,17 @@ def answer_asset_basic_question(question, current_user, limit=5):
     asset_code_match = re.search(r"\b([A-Z]\d{3}-[A-Z0-9]+-\d{3,4})\b", raw.upper())
     asset_code = str(asset_code_match.group(1) or "").strip().upper() if asset_code_match else ""
     lab_name = _extract_lab_name_from_text(raw)
+    warehouse_name = _extract_warehouse_name_from_text(raw)
     wants_count = any(token in compact for token in ("多少", "几台", "几个", "几条"))
     wants_risk = any(token in compact for token in ("高风险", "风险较高", "故障风险", "风险设备"))
+    wants_location = any(token in compact for token in ("在哪", "在哪里", "位置", "放哪", "放在哪里", "在哪儿"))
+    wants_warehouse_list = "仓库" in compact and any(token in compact for token in ("有哪些", "有什么", "列表", "清单", "目前", "当前", "现有", "多少", "几个"))
+    wants_warehouse_assets = (
+        "仓库" in compact
+        and any(token in compact for token in ("资产", "设备", "里面", "库内", "库存", "有什么", "有哪些"))
+    )
     mentions_asset = bool(asset_code) or any(
-        token in compact for token in ("资产", "设备", "借出", "借用中", "维修中", "报废", "维保", "质保", "到期")
+        token in compact for token in ("资产", "设备", "仓库", "借出", "借用中", "维修中", "报废", "维保", "质保", "到期")
     )
     if not mentions_asset:
         return {"matched": False}
@@ -4380,8 +4874,48 @@ def answer_asset_basic_question(question, current_user, limit=5):
             "sources": [],
         }
 
-    jump_url = "/pages/admin/equipments" if str(actor.get("role") or "").strip().lower() == "admin" else "/pages/teacher/assets"
+    current_role = str(actor.get("role") or "").strip().lower()
+    jump_url = "/pages/admin/equipments" if current_role == "admin" else "/pages/teacher/assets"
     sources = [{"title": "资产只读视图", "url": jump_url}]
+    if current_role == "admin":
+        sources.append({"title": "仓库管理", "url": "/pages/admin/warehouses"})
+
+    if warehouse_name and not asset_code and wants_location and not wants_warehouse_assets:
+        warehouse = find_basic_warehouse_by_name(warehouse_name)
+        if warehouse:
+            detail = f"{warehouse.get('name') or warehouse_name} 位于 {warehouse.get('location') or '未登记位置'}"
+            detail += f"，当前登记资产 {int(warehouse.get('assetCount') or 0)} 条。"
+            if warehouse.get("managerName"):
+                detail += f" 仓库负责人：{warehouse.get('managerName')}。"
+            return {"matched": True, "answer": detail, "intent": "warehouse_lookup", "sources": sources}
+
+    if wants_warehouse_list and not asset_code and not warehouse_name:
+        warehouse_items = list_basic_warehouse_records(limit=max(3, min(int(limit or 5), 12)))
+        if not warehouse_items:
+            return {"matched": True, "answer": "当前还没有登记仓库数据。", "intent": "warehouse_summary", "sources": sources}
+        total_rows = query("SELECT COUNT(1) AS cnt FROM warehouse")
+        total_warehouses = int((total_rows[0] or {}).get("cnt") or 0) if total_rows else len(warehouse_items)
+        if wants_count:
+            return {
+                "matched": True,
+                "answer": f"当前共登记 {total_warehouses} 个仓库："
+                + "；".join([f"{item.get('name') or '-'}（{int(item.get('assetCount') or 0)} 条资产）" for item in warehouse_items[:8]])
+                + "。",
+                "intent": "warehouse_summary",
+                "sources": sources,
+            }
+        lines = []
+        for idx, item in enumerate(warehouse_items[:8], start=1):
+            lines.append(
+                f"{idx}. {item.get('name') or '-'}，位置 {item.get('location') or '未登记'}，"
+                f"资产 {int(item.get('assetCount') or 0)} 条"
+            )
+        return {
+            "matched": True,
+            "answer": "当前登记的仓库如下：\n" + "\n".join(lines),
+            "intent": "warehouse_summary",
+            "sources": sources,
+        }
 
     if wants_risk:
         prediction_payload = list_equipment_failure_predictions(limit=12, horizon_days=30, auto_refresh=True)
@@ -4390,9 +4924,11 @@ def answer_asset_basic_question(question, current_user, limit=5):
             rows = [row for row in rows if str(row.get("assetCode") or "").strip().upper() == asset_code]
         if lab_name:
             rows = [row for row in rows if lab_name in str(row.get("labName") or "").strip()]
+        if warehouse_name:
+            rows = [row for row in rows if warehouse_name in str(row.get("warehouseName") or "").strip()]
         rows = rows[: max(1, min(int(limit or 5), 8))]
         if not rows:
-            prefix = f"{lab_name} " if lab_name else ""
+            prefix = f"{warehouse_name or lab_name} " if (warehouse_name or lab_name) else ""
             return {"matched": True, "answer": f"{prefix}当前没有匹配到高风险设备。", "intent": "asset_risk", "sources": sources}
         if wants_count:
             return {
@@ -4403,9 +4939,10 @@ def answer_asset_basic_question(question, current_user, limit=5):
             }
         lines = []
         for idx, row in enumerate(rows, start=1):
+            row_location = str(row.get("warehouseName") or row.get("labName") or "-").strip()
             lines.append(
                 f"{idx}. {str(row.get('assetCode') or '-').strip()} {str(row.get('name') or '-').strip()}，"
-                f"{str(row.get('labName') or '-').strip()}，风险分 {int(float(row.get('riskScore') or 0))}，"
+                f"{row_location}，风险分 {int(float(row.get('riskScore') or 0))}，"
                 f"建议：{str(row.get('recommendation') or '尽快排查').strip()}"
             )
         return {"matched": True, "answer": "当前优先关注的高风险设备如下：\n" + "\n".join(lines), "intent": "asset_risk", "sources": sources}
@@ -4433,16 +4970,61 @@ def answer_asset_basic_question(question, current_user, limit=5):
             return {"matched": True, "answer": f"没有找到资产编号为 {asset_code} 的设备。", "intent": "asset_lookup", "sources": sources}
         answer = (
             f"{row.get('assetCode') or '-'} 当前状态为{row.get('statusLabel') or '未知'}，"
-            f"位于 {row.get('labName') or '-'}，"
+            f"位于 {row.get('locationText') or '未登记具体位置'}，"
             f"借用状态为{row.get('borrowStatusText') or '-'}，"
             f"下次维保 {row.get('nextMaintenanceAt') or '未设置'}，"
             f"质保到期 {row.get('warrantyUntil') or '未设置'}。"
         )
         return {"matched": True, "answer": answer, "intent": "asset_lookup", "sources": sources}
 
+    if warehouse_name and wants_warehouse_assets:
+        warehouse = find_basic_warehouse_by_name(warehouse_name)
+        result = list_basic_asset_records(
+            keyword="",
+            warehouse_name=warehouse_name,
+            status=status,
+            is_borrowed=is_borrowed,
+            maintenance_due_days=maintenance_due_days,
+            warranty_due_days=warranty_due_days,
+            page=1,
+            page_size=max(1, min(int(limit or 5), 10)),
+        )
+        items = result.get("items") if isinstance(result.get("items"), list) else []
+        total = int(((result.get("meta") or {}).get("total")) or 0)
+        if total <= 0:
+            return {
+                "matched": True,
+                "answer": f"{warehouse_name} 当前没有匹配到资产数据。",
+                "intent": "warehouse_assets",
+                "sources": sources,
+            }
+        if wants_count:
+            return {
+                "matched": True,
+                "answer": f"{warehouse_name} 当前共有 {total} 条资产记录。",
+                "intent": "warehouse_assets",
+                "sources": sources,
+            }
+        lines = []
+        for idx, row in enumerate(items[:5], start=1):
+            lines.append(
+                f"{idx}. {row.get('assetCode') or '-'} {row.get('name') or '-'}，"
+                f"{row.get('statusLabel') or '-'}，{row.get('borrowStatusText') or '-'}"
+            )
+        prefix = f"{warehouse.get('name') or warehouse_name} 当前登记 {total} 条资产。"
+        if warehouse and warehouse.get("location"):
+            prefix += f" 仓库位置：{warehouse.get('location')}。"
+        return {
+            "matched": True,
+            "answer": prefix + "\n" + "\n".join(lines),
+            "intent": "warehouse_assets",
+            "sources": sources,
+        }
+
     result = list_basic_asset_records(
         keyword="",
         lab_name=lab_name,
+        warehouse_name=warehouse_name,
         status=status,
         is_borrowed=is_borrowed,
         maintenance_due_days=maintenance_due_days,
@@ -4453,13 +5035,15 @@ def answer_asset_basic_question(question, current_user, limit=5):
     items = result.get("items") if isinstance(result.get("items"), list) else []
     total = int(((result.get("meta") or {}).get("total")) or 0)
     if total <= 0:
-        prefix = f"{lab_name} " if lab_name else ""
+        prefix = f"{warehouse_name or lab_name} " if (warehouse_name or lab_name) else ""
         return {"matched": True, "answer": f"{prefix}当前没有匹配到资产数据。", "intent": "asset_lookup", "sources": sources}
 
     if wants_count:
         bits = []
         if lab_name:
             bits.append(lab_name)
+        if warehouse_name:
+            bits.append(warehouse_name)
         if status == "repairing":
             bits.append("维修中设备")
         elif status == "scrapped":
@@ -4478,7 +5062,7 @@ def answer_asset_basic_question(question, current_user, limit=5):
     for idx, row in enumerate(items[:5], start=1):
         preview_lines.append(
             f"{idx}. {row.get('assetCode') or '-'} {row.get('name') or '-'}，"
-            f"{row.get('labName') or '-'}，{row.get('statusLabel') or '-'}，{row.get('borrowStatusText') or '-'}"
+            f"{row.get('locationText') or '-'}，{row.get('statusLabel') or '-'}，{row.get('borrowStatusText') or '-'}"
         )
     return {
         "matched": True,

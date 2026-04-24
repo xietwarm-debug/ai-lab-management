@@ -53,6 +53,7 @@
             <view>
               <view class="rowTitle">{{ item.termName || ("模板#" + item.id) }}</view>
               <view class="rowMeta">开学：{{ item.semesterStartDate || "-" }} · 周数：{{ item.semesterWeeks || "-" }} · 明细：{{ item.itemCount || 0 }}</view>
+              <view class="rowMeta">课程：{{ item.courseCount || 0 }} 门<span v-if="item.coursePreview && item.coursePreview.length"> · {{ item.coursePreview.join(" / ") }}{{ (item.courseCount || 0) > item.coursePreview.length ? " 等" : "" }}</span></view>
               <view class="rowMeta">状态：{{ item.status === "active" ? "启用中" : item.status || "-" }} · 提前提醒：{{ item.reminderLeadMinutes || 20 }} 分钟</view>
             </view>
             <view class="rowActions">

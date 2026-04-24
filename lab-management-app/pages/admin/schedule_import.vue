@@ -113,6 +113,20 @@
           <view class="chip" @click="clearPasteRows">清空粘贴条目</view>
           <view class="muted">已解析 {{ pasteItems.length }} 条</view>
         </view>
+        <view v-if="pasteErrors.length>0" class="errorList">
+          <view class="errorTitle">以下 {{ pasteErrors.length }} 行需要先修正：</view>
+          <view class="errorItem" v-for="item in pasteErrors.slice(0, 6)" :key="`${item.rowNo}-${item.reason}`">
+            第{{ item.rowNo }}行：{{ item.reason }}
+          </view>
+        </view>
+        <view v-if="pasteItems.length>0" class="list mt8">
+          <view class="rowItem" v-for="item in pasteItems.slice(0, 6)" :key="`paste-${item.rowNo || item.courseName}`">
+            <view class="rowTitle">{{ item.courseName || "-" }} · {{ item.labName || "-" }}</view>
+            <view class="rowMeta">{{ item.weekDay || "-" }} · {{ item.periodRange || item.timeRange || "-" }} · {{ item.weekRange || "-" }}</view>
+            <view class="rowMeta">{{ item.teacherName || "-" }} · {{ item.className || "-" }}</view>
+          </view>
+          <view v-if="pasteItems.length > 6" class="muted mt8">仅预览前 6 条，导入时会提交全部解析记录</view>
+        </view>
       </view>
 
       <view class="card">
@@ -195,6 +209,7 @@ export default {
       pasteText: "",
       manualItems: [],
       pasteItems: [],
+      pasteErrors: [],
       editingTemplateId: 0,
       loadedTemplateId: 0,
       loadingTemplate: false
@@ -349,6 +364,7 @@ export default {
           }
         })
         this.pasteItems = []
+        this.pasteErrors = []
         this.loadedTemplateId = this.editingTemplateId
       } catch (e) {
         uni.showToast({ title: "模板加载失败", icon: "none" })
@@ -378,6 +394,22 @@ export default {
     weekTypeText(v) {
       const row = this.weekTypeOptions.find((x) => String(x.value) === String(v))
       return row ? row.label : v
+    },
+    normalizeText(v) {
+      return String(v || "").trim()
+    },
+    validatePasteItem(item) {
+      const reasons = []
+      if (!this.normalizeText(item.courseName)) reasons.push("缺少课程名")
+      if (!this.normalizeText(item.weekDay)) reasons.push("缺少星期")
+      if (!this.normalizeText(item.periodRange) && !this.normalizeText(item.timeRange)) reasons.push("缺少节次或时间段")
+      if (!this.normalizeText(item.weekRange)) reasons.push("缺少周次")
+      if (!this.normalizeText(item.labName)) reasons.push("缺少实验室")
+      if (this.normalizeText(item.labName) && Array.isArray(this.labs) && this.labs.length > 0) {
+        const hasLab = this.labs.some((lab) => this.normalizeText((lab || {}).name) === this.normalizeText(item.labName))
+        if (!hasLab) reasons.push("实验室未匹配")
+      }
+      return reasons
     },
     toggleDraftTime(slot) {
       const text = String(slot || "").trim()
@@ -439,12 +471,14 @@ export default {
     },
     clearPasteRows() {
       this.pasteItems = []
+      this.pasteErrors = []
       this.pasteText = ""
     },
     parsePasteText() {
       const lines = String(this.pasteText || "").split(/\r?\n/)
       const out = []
-      lines.forEach((line) => {
+      const errors = []
+      lines.forEach((line, index) => {
         const text = String(line || "").trim()
         if (!text) return
         const rawParts = (text.includes("\t") ? text.split("\t") : text.split(/,|，/)).map((x) => String(x || "").trim())
@@ -479,7 +513,8 @@ export default {
           className = parts[6]
           note = parts[7]
         }
-        out.push({
+        const item = {
+          rowNo: index + 1,
           courseName: parts[0],
           weekDay,
           periodRange,
@@ -490,15 +525,26 @@ export default {
           className,
           note,
           weekType: "all"
-        })
+        }
+        const reasons = this.validatePasteItem(item)
+        if (reasons.length > 0) {
+          errors.push({ rowNo: index + 1, reason: reasons.join("；") })
+          return
+        }
+        out.push(item)
       })
       this.pasteItems = out
+      this.pasteErrors = errors
       uni.showToast({ title: `已解析 ${out.length} 条`, icon: "none" })
     },
     async submitImport() {
       if (this.saving) return
       if (!this.form.semesterStartDate) {
         uni.showToast({ title: "请选择开学日期", icon: "none" })
+        return
+      }
+      if (this.pasteErrors.length > 0) {
+        uni.showToast({ title: "请先修正粘贴数据中的异常行", icon: "none" })
         return
       }
       if (this.allItems.length <= 0) {
@@ -529,9 +575,12 @@ export default {
           return
         }
         const data = payload.data || {}
+        const errorLines = Array.isArray(data.errors)
+          ? data.errors.slice(0, 6).map((item) => `第${item.row || item.rowNo || "-"}行：${item.reason || "格式异常"}`)
+          : []
         uni.showModal({
           title: this.isEditMode ? "保存完成" : "导入完成",
-          content: `模板ID: ${data.templateId || "-"}\n导入条数: ${data.inserted || 0}\n错误条数: ${(data.errors || []).length}`,
+          content: `模板ID: ${data.templateId || "-"}\n导入条数: ${data.inserted || 0}\n错误条数: ${(data.errors || []).length}${errorLines.length ? `\n${errorLines.join("\n")}` : ""}`,
           showCancel: false,
           success: () => {
             uni.navigateBack()
@@ -605,6 +654,26 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.errorList {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid rgba(249, 115, 22, 0.24);
+}
+
+.errorTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #c2410c;
+}
+
+.errorItem {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9a3412;
 }
 
 .rowItem {

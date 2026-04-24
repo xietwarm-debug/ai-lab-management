@@ -80,12 +80,26 @@
         <input class="inputBase" v-model.trim="form.price" type="digit" placeholder="例如：5999.00" />
         <view class="fieldError" v-if="errors.price">{{ errors.price }}</view>
 
-        <view class="label">规格 JSON</view>
-        <view class="label">Asset Photo</view>
-        <input class="inputBase" v-model.trim="form.imageUrl" maxlength="500" placeholder="Image URL or /uploads/ path" />
+        <view class="label">资产照片</view>
+        <view class="uploadRow">
+          <button class="btnSecondary miniBtn" size="mini" :disabled="uploading" @click="chooseImage">
+            {{ uploading ? "上传中..." : "上传图片" }}
+          </button>
+          <button
+            v-if="form.imageUrl"
+            class="btnGhost miniBtn"
+            size="mini"
+            :disabled="uploading"
+            @click="removeImage"
+          >
+            移除图片
+          </button>
+        </view>
+        <input class="inputBase" v-model.trim="form.imageUrl" maxlength="500" placeholder="可填写图片 URL 或 /uploads/ 路径" />
         <view class="fieldError" v-if="errors.imageUrl">{{ errors.imageUrl }}</view>
         <image v-if="form.imageUrl" class="preview" :src="imgSrc(form.imageUrl)" mode="aspectFill" />
 
+        <view class="label">规格 JSON</view>
         <textarea
           class="textareaBase"
           v-model.trim="form.specJson"
@@ -100,7 +114,7 @@
         <view class="summaryLine">设备名称：{{ form.name || "-" }}</view>
         <view class="summaryLine">状态：{{ statusText(form.status) }}</view>
         <view class="summaryLine">借用权限：{{ form.allowBorrow ? "允许借用" : "禁止借用" }}</view>
-        <button class="btnPrimary submitBtn" :disabled="saving" @click="submit">
+        <button class="btnPrimary submitBtn" :disabled="saving || uploading" @click="submit">
           {{ saving ? "提交中..." : (isCreate ? "创建设备" : "保存修改") }}
         </button>
       </view>
@@ -109,7 +123,7 @@
 </template>
 
 <script>
-import { apiRequest } from "@/common/api.js"
+import { BASE_URL, apiRequest } from "@/common/api.js"
 
 export default {
   data() {
@@ -118,6 +132,7 @@ export default {
       isCreate: true,
       loading: false,
       saving: false,
+      uploading: false,
       form: {
         assetCode: "",
         name: "",
@@ -139,7 +154,8 @@ export default {
         name: "",
         status: "",
         purchaseDate: "",
-        price: ""
+        price: "",
+        imageUrl: ""
       }
     }
   },
@@ -207,6 +223,10 @@ export default {
       this.form.purchaseDate = (e && e.detail && e.detail.value) || ""
       this.errors.purchaseDate = ""
     },
+    removeImage() {
+      this.form.imageUrl = ""
+      this.errors.imageUrl = ""
+    },
     clearErrors() {
       this.errors = {
         assetCode: "",
@@ -221,7 +241,45 @@ export default {
       const raw = String(url || "").trim()
       if (!raw) return ""
       if (/^https?:\/\//i.test(raw)) return raw
-      return raw
+      return raw.startsWith("/") ? `${BASE_URL}${raw}` : raw
+    },
+    chooseImage() {
+      if (this.uploading) return
+      uni.chooseImage({
+        count: 1,
+        success: (res) => {
+          const filePath = res.tempFilePaths && res.tempFilePaths[0]
+          if (!filePath) return
+
+          this.uploading = true
+          uni.uploadFile({
+            url: `${BASE_URL}/upload`,
+            filePath,
+            name: "file",
+            success: (up) => {
+              let payload = null
+              try {
+                payload = typeof up.data === "string" ? JSON.parse(up.data) : up.data
+              } catch (e) {
+                payload = null
+              }
+              if (!payload || !payload.ok || !payload.data || !payload.data.url) {
+                uni.showToast({ title: (payload && payload.msg) || "上传失败", icon: "none" })
+                return
+              }
+              this.form.imageUrl = payload.data.url
+              this.errors.imageUrl = ""
+              uni.showToast({ title: "上传成功", icon: "success" })
+            },
+            fail: () => {
+              uni.showToast({ title: "上传失败", icon: "none" })
+            },
+            complete: () => {
+              this.uploading = false
+            }
+          })
+        }
+      })
     },
     validate() {
       this.clearErrors()
@@ -394,6 +452,13 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.uploadRow {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .statusChip {

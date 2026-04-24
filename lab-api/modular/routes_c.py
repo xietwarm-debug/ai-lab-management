@@ -218,7 +218,25 @@ def create_reservation():
         if int(e.status or 0) == 409 and isinstance(conflict_data, dict) and isinstance(conflict_data.get("plans"), list):
             plans = _agent_normalize_plan_items(conflict_data.get("plans"))
             reply = str(conflict_data.get("reply") or "").strip() or _agent_build_plan_options_text(plans)
-            return jsonify({"code": 409, "msg": "conflict", "data": {"reply": reply, "plans": plans, "waitlistRecommended": True, "waitlistSlot": {"labName": lab_name, "date": date, "time": time_range, "reason": reason}}}), 409
+            return jsonify(
+                {
+                    "ok": False,
+                    "code": 409,
+                    "errorCode": "conflict",
+                    "msg": "该时段已被预约",
+                    "data": {
+                        "reply": reply,
+                        "plans": plans,
+                        "waitlistRecommended": True,
+                        "waitlistSlot": {
+                            "labName": lab_name,
+                            "date": date,
+                            "time": time_range,
+                            "reason": reason,
+                        },
+                    },
+                }
+            ), 409
         return jsonify({"ok": False, "msg": e.msg}), e.status
 
     return jsonify(
@@ -1813,6 +1831,122 @@ def _build_announcement_ai_draft(title_hint="", content_hint="", publish_at="", 
     }
 
 
+def _sanitize_announcement_ai_draft(payload, fallback):
+    data = payload if isinstance(payload, dict) else {}
+    fallback = fallback or {}
+
+    title = str(data.get("title") or fallback.get("title") or "").strip()[:120]
+    content = str(data.get("content") or fallback.get("content") or "").strip()[:5000]
+    summary = str(data.get("summary") or fallback.get("summary") or "").strip()[:200]
+
+    publish_raw = data.get("publishAtSuggestion")
+    if publish_raw in (None, ""):
+        publish_raw = data.get("publishAt")
+    if publish_raw in (None, ""):
+        publish_raw = fallback.get("publishAtSuggestion")
+    try:
+        publish_at = _normalize_announcement_publish_at(publish_raw, default_now=True)
+    except BizError:
+        publish_at = _normalize_announcement_publish_at(fallback.get("publishAtSuggestion"), default_now=True)
+
+    pinned_raw = data.get("isPinnedSuggestion")
+    if pinned_raw is None and "isPinned" in data:
+        pinned_raw = data.get("isPinned")
+    try:
+        is_pinned = _normalize_announcement_is_pinned(
+            pinned_raw,
+            default=1 if bool(fallback.get("isPinnedSuggestion")) else 0,
+        ) == 1
+    except BizError:
+        is_pinned = bool(fallback.get("isPinnedSuggestion"))
+
+    scene = str(data.get("scene") or fallback.get("scene") or "general").strip().lower()
+    if scene not in {"course", "maintenance", "safety", "general"}:
+        scene = str(fallback.get("scene") or "general").strip().lower() or "general"
+
+    if not title:
+        raise BizError("announcement ai draft title empty", 502)
+    if not content:
+        raise BizError("announcement ai draft content empty", 502)
+
+    return {
+        "title": title,
+        "content": content,
+        "summary": summary,
+        "publishAtSuggestion": publish_at,
+        "isPinnedSuggestion": bool(is_pinned),
+        "scene": scene,
+    }
+
+
+def _generate_announcement_ai_draft(title_hint="", content_hint="", publish_at="", is_pinned=False):
+    fallback = _build_announcement_ai_draft(
+        title_hint=title_hint,
+        content_hint=content_hint,
+        publish_at=publish_at,
+        is_pinned=is_pinned,
+    )
+    prompt = {
+        "task": "rewrite_or_polish_announcement",
+        "requirements": {
+            "language": "Simplified Chinese",
+            "titleMaxLength": 120,
+            "contentMaxLength": 5000,
+            "summaryMaxLength": 200,
+            "mustBeDirectlyPublishable": True,
+            "keepFactsConservative": True,
+            "allowedScenes": ["course", "maintenance", "safety", "general"],
+            "publishAtFormat": "YYYY-MM-DD HH:MM:SS",
+        },
+        "input": {
+            "titleHint": str(title_hint or "").strip(),
+            "contentHint": str(content_hint or "").strip(),
+            "publishAt": str(publish_at or "").strip(),
+            "isPinned": bool(is_pinned),
+            "scene": str(fallback.get("scene") or "general"),
+        },
+        "outputSchema": {
+            "title": "string",
+            "content": "string",
+            "summary": "string",
+            "publishAtSuggestion": "string",
+            "isPinnedSuggestion": "boolean",
+            "scene": "course|maintenance|safety|general",
+        },
+    }
+    content = _call_siliconflow_chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You are an editor for lab management announcements. "
+                    "Return strict JSON only with the requested fields. "
+                    "No markdown, no code fence, no extra explanation."
+                ),
+            },
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+        temperature=0.3,
+    )
+
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        extracted = _extract_json_object(content)
+        if not extracted:
+            raise BizError("announcement ai draft parse failed", 502)
+        try:
+            parsed = json.loads(extracted)
+        except Exception:
+            raise BizError("announcement ai draft parse failed", 502)
+
+    draft = _sanitize_announcement_ai_draft(parsed, fallback)
+    draft["provider"] = "siliconflow"
+    draft["model"] = SILICONFLOW_MODEL
+    draft["source"] = "llm"
+    return draft
+
+
 def _fetch_announcement_row(announcement_id):
     rows = query(
         """
@@ -1862,9 +1996,14 @@ def _format_announcement_payload(row):
 @auth_required(roles=["admin"])
 def announcement_ai_draft():
     payload = request.get_json(force=True) or {}
-    draft = _build_announcement_ai_draft(
-        title_hint=payload.get("titleHint"),
-        content_hint=payload.get("contentHint"),
+    try:
+        title_hint = _normalize_announcement_title(payload.get("titleHint"))
+        content_hint = _normalize_announcement_content(payload.get("contentHint"))
+    except BizError as e:
+        return jsonify({"ok": False, "msg": e.msg}), e.status
+    draft = _generate_announcement_ai_draft(
+        title_hint=title_hint,
+        content_hint=content_hint,
         publish_at=payload.get("publishAt"),
         is_pinned=_normalize_announcement_is_pinned(payload.get("isPinned"), default=0) == 1,
     )
@@ -1872,7 +2011,12 @@ def announcement_ai_draft():
     audit_log(
         "announcement.ai_draft",
         target_type="announcement",
-        detail={"scene": draft.get("scene"), "isPinned": bool(draft.get("isPinnedSuggestion"))},
+        detail={
+            "scene": draft.get("scene"),
+            "isPinned": bool(draft.get("isPinnedSuggestion")),
+            "source": draft.get("source"),
+            "model": draft.get("model"),
+        },
         actor={"id": current_user.get("id"), "username": current_user.get("username"), "role": current_user.get("role")},
     )
     return jsonify({"ok": True, "data": draft})
